@@ -473,6 +473,11 @@ def index():
         return f"Internal server error: {exc}", 500
 
 
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}, 200
+
+
 @app.get("/download/<fmt>/<path:filename>")
 def download(fmt: str, filename: str):
     if fmt not in {"json", "csv"}:
