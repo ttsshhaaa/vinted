@@ -1,0 +1,388 @@
+import argparse
+import csv
+import json
+import re
+import time
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Iterable
+from urllib.parse import urlencode
+
+import requests
+from bs4 import BeautifulSoup
+
+
+DEFAULT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/135.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+GEO_DOMAINS = {
+    "us": "https://www.vinted.com",
+    "uk": "https://www.vinted.co.uk",
+    "fr": "https://www.vinted.fr",
+    "de": "https://www.vinted.de",
+    "it": "https://www.vinted.it",
+    "es": "https://www.vinted.es",
+    "nl": "https://www.vinted.nl",
+    "be": "https://www.vinted.be",
+    "pt": "https://www.vinted.pt",
+    "pl": "https://www.vinted.pl",
+    "cz": "https://www.vinted.cz",
+    "sk": "https://www.vinted.sk",
+    "at": "https://www.vinted.at",
+    "hu": "https://www.vinted.hu",
+    "ro": "https://www.vinted.ro",
+    "hr": "https://www.vinted.hr",
+    "lt": "https://www.vinted.lt",
+}
+
+
+@dataclass
+class Item:
+    geo: str
+    item_id: str
+    title: str
+    subtitle: str
+    brand: str
+    size: str
+    condition: str
+    price: str
+    total_price: str
+    currency: str
+    image_url: str
+    item_url: str
+    search_url: str
+
+
+AGE_PATTERNS = [
+    (re.compile(r"(\d+)\s*(?:minute|minutes|min)\b", re.IGNORECASE), 1),
+    (re.compile(r"(\d+)\s*(?:heure|heures|hour|hours)\b", re.IGNORECASE), 60),
+    (re.compile(r"(\d+)\s*(?:jour|jours|day|days)\b", re.IGNORECASE), 1440),
+    (re.compile(r"(\d+)\s*(?:semaine|semaines|week|weeks)\b", re.IGNORECASE), 10080),
+]
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Multi-geo Vinted parser that extracts catalog items from public search pages."
+    )
+    parser.add_argument("--query", required=True, help="Search text, for example: nike tech fleece")
+    parser.add_argument(
+        "--geo",
+        default="all",
+        help="Comma-separated geo codes like fr,de,it or 'all'.",
+    )
+    parser.add_argument("--pages", type=int, default=1, help="Pages per geo.")
+    parser.add_argument("--delay", type=float, default=1.0, help="Delay between requests per geo.")
+    parser.add_argument(
+        "--order",
+        default="newest_first",
+        help="Catalog ordering, for example newest_first, relevance, price_low_to_high.",
+    )
+    parser.add_argument("--price-from", dest="price_from", type=int, help="Minimum price.")
+    parser.add_argument("--price-to", dest="price_to", type=int, help="Maximum price.")
+    parser.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        help="Extra raw query param in key=value format. Can be repeated.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="output",
+        help="Directory where JSON and CSV exports will be written.",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=30,
+        help="Request timeout in seconds.",
+    )
+    return parser.parse_args()
+
+
+def parse_extra_params(raw_params: Iterable[str]) -> dict[str, str]:
+    params: dict[str, str] = {}
+    for raw in raw_params:
+        if "=" not in raw:
+            raise ValueError(f"Invalid --param value '{raw}'. Expected key=value.")
+        key, value = raw.split("=", 1)
+        params[key] = value
+    return params
+
+
+def expand_geos(raw_geo: str | Iterable[str]) -> list[str]:
+    if isinstance(raw_geo, str):
+        if raw_geo.strip().lower() == "all":
+            return list(GEO_DOMAINS.keys())
+        geos = [part.strip().lower() for part in raw_geo.split(",") if part.strip()]
+    else:
+        geos = [str(part).strip().lower() for part in raw_geo if str(part).strip()]
+
+    unknown = [geo for geo in geos if geo not in GEO_DOMAINS]
+    if unknown:
+        raise ValueError(
+            f"Unknown geo(s): {', '.join(unknown)}. Supported: {', '.join(sorted(GEO_DOMAINS))}"
+        )
+    return geos
+
+
+def clean_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def extract_currency(*values: str) -> str:
+    joined = " ".join(filter(None, values))
+    match = re.search(r"([$€£]|PLN|CZK|HUF|RON|USD|EUR|GBP)", joined, flags=re.IGNORECASE)
+    return match.group(1).upper() if match else ""
+
+
+def split_subtitle(subtitle: str) -> tuple[str, str]:
+    parts = [part.strip() for part in re.split(r"\s*[·•]\s*", subtitle) if part.strip()]
+    size = parts[0] if len(parts) >= 1 else ""
+    condition = parts[-1] if len(parts) >= 2 else ""
+    return size, condition
+
+
+def build_search_url(
+    base_url: str,
+    query: str,
+    page: int,
+    order: str,
+    price_from: int | None,
+    price_to: int | None,
+    extra_params: dict[str, str],
+) -> str:
+    params = {
+        "search_text": query,
+        "page": str(page),
+        "order": order,
+    }
+    if price_from is not None:
+        params["price_from"] = str(price_from)
+    if price_to is not None:
+        params["price_to"] = str(price_to)
+    params.update(extra_params)
+    return f"{base_url}/catalog?{urlencode(params, doseq=True)}"
+
+
+def parse_items(html: str, geo: str, search_url: str) -> list[Item]:
+    soup = BeautifulSoup(html, "html.parser")
+    items: list[Item] = []
+
+    for container in soup.select("div.new-item-box__container[data-testid^='product-item-id-']"):
+        item_id = container.get("data-testid", "").replace("product-item-id-", "")
+        image = container.select_one("img")
+        overlay = container.select_one("a.new-item-box__overlay")
+        title_node = container.select_one("[data-testid$='--description-title']")
+        subtitle_node = container.select_one("[data-testid$='--description-subtitle']")
+        price_node = container.select_one("[data-testid$='--price-text']")
+        total_node = container.select_one("[data-testid='total-combined-price']")
+
+        if not overlay:
+            continue
+
+        alt_text = clean_text(image.get("alt", "")) if image else ""
+        brand = clean_text(title_node.get_text(" ", strip=True)) if title_node else ""
+        subtitle = clean_text(subtitle_node.get_text(" ", strip=True)) if subtitle_node else ""
+        size, condition = split_subtitle(subtitle)
+        item_url = overlay.get("href", "").strip()
+
+        if item_url.startswith("/"):
+            item_url = f"{GEO_DOMAINS[geo]}{item_url}"
+
+        title = alt_text.split(", brand:", 1)[0] if ", brand:" in alt_text else alt_text or brand
+        price = clean_text(price_node.get_text(" ", strip=True)) if price_node else ""
+        total_price = clean_text(total_node.get_text(" ", strip=True)) if total_node else ""
+
+        items.append(
+            Item(
+                geo=geo,
+                item_id=item_id,
+                title=title,
+                subtitle=subtitle,
+                brand=brand,
+                size=size,
+                condition=condition,
+                price=price,
+                total_price=total_price,
+                currency=extract_currency(price, total_price, alt_text),
+                image_url=image.get("src", "").strip() if image else "",
+                item_url=item_url,
+                search_url=search_url,
+            )
+        )
+
+    return items
+
+
+def fetch_html(session: requests.Session, url: str, timeout: int) -> str:
+    response = session.get(url, timeout=timeout, headers=DEFAULT_HEADERS)
+    response.raise_for_status()
+    return response.content.decode("utf-8", errors="replace")
+
+
+def get_item_age_minutes(session: requests.Session, item_url: str, timeout: int = 30) -> int | None:
+    try:
+        html = fetch_html(session, item_url, timeout=timeout)
+    except requests.RequestException:
+        return None
+
+    soup = BeautifulSoup(html, "html.parser")
+    for text in soup.stripped_strings:
+        normalized = clean_text(text)
+        lower = normalized.lower()
+        if not any(token in lower for token in ("ajout", "added", "il y a", "ago")):
+            continue
+        for pattern, multiplier in AGE_PATTERNS:
+            match = pattern.search(lower)
+            if match:
+                return int(match.group(1)) * multiplier
+    return None
+
+
+def scrape_geo(
+    session: requests.Session,
+    geo: str,
+    query: str,
+    pages: int,
+    delay: float,
+    order: str,
+    price_from: int | None,
+    price_to: int | None,
+    extra_params: dict[str, str],
+    timeout: int,
+) -> list[Item]:
+    base_url = GEO_DOMAINS[geo]
+    all_items: list[Item] = []
+
+    for page in range(1, pages + 1):
+        search_url = build_search_url(
+            base_url=base_url,
+            query=query,
+            page=page,
+            order=order,
+            price_from=price_from,
+            price_to=price_to,
+            extra_params=extra_params,
+        )
+        html = fetch_html(session, search_url, timeout=timeout)
+        page_items = parse_items(html, geo=geo, search_url=search_url)
+        print(f"[{geo}] page={page} items={len(page_items)} url={search_url}")
+        all_items.extend(page_items)
+
+        if page < pages and delay > 0:
+            time.sleep(delay)
+
+    return all_items
+
+
+def dedupe_items(items: list[Item]) -> list[Item]:
+    unique: dict[str, Item] = {}
+    for item in items:
+        unique[item.item_url] = item
+    return list(unique.values())
+
+
+def write_outputs(items: list[Item], output_dir: Path, query: str) -> tuple[Path, Path]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    slug = re.sub(r"[^a-z0-9]+", "_", query.lower()).strip("_") or "query"
+    json_path = output_dir / f"vinted_{slug}_{stamp}.json"
+    csv_path = output_dir / f"vinted_{slug}_{stamp}.csv"
+
+    payload = [asdict(item) for item in items]
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    fieldnames = list(payload[0].keys()) if payload else list(Item.__dataclass_fields__.keys())
+    with csv_path.open("w", newline="", encoding="utf-8-sig") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(payload)
+
+    return json_path, csv_path
+
+
+def run_search(
+    query: str,
+    geos: list[str],
+    pages: int = 1,
+    delay: float = 1.0,
+    order: str = "newest_first",
+    price_from: int | None = None,
+    price_to: int | None = None,
+    extra_params: dict[str, str] | None = None,
+    timeout: int = 30,
+    output_dir: str | Path = "output",
+) -> dict:
+    extra_params = extra_params or {}
+    session = requests.Session()
+    all_items: list[Item] = []
+    failures: list[str] = []
+
+    for geo in geos:
+        try:
+            all_items.extend(
+                scrape_geo(
+                    session=session,
+                    geo=geo,
+                    query=query,
+                    pages=pages,
+                    delay=delay,
+                    order=order,
+                    price_from=price_from,
+                    price_to=price_to,
+                    extra_params=extra_params,
+                    timeout=timeout,
+                )
+            )
+        except requests.RequestException as exc:
+            failures.append(f"[{geo}] {exc}")
+
+    unique_items = dedupe_items(all_items)
+    json_path, csv_path = write_outputs(unique_items, output_dir=Path(output_dir), query=query)
+    return {
+        "items": unique_items,
+        "raw_count": len(all_items),
+        "unique_count": len(unique_items),
+        "json_path": json_path,
+        "csv_path": csv_path,
+        "failures": failures,
+    }
+
+
+def main() -> None:
+    args = parse_args()
+    geos = expand_geos(args.geo)
+    extra_params = parse_extra_params(args.param)
+    result = run_search(
+        query=args.query,
+        geos=geos,
+        pages=args.pages,
+        delay=args.delay,
+        order=args.order,
+        price_from=args.price_from,
+        price_to=args.price_to,
+        extra_params=extra_params,
+        timeout=args.timeout,
+        output_dir=args.output_dir,
+    )
+
+    print(f"\nDone. Total raw items: {result['raw_count']}")
+    print(f"Done. Unique items: {result['unique_count']}")
+    print(f"JSON: {result['json_path'].resolve()}")
+    print(f"CSV:  {result['csv_path'].resolve()}")
+    if result["failures"]:
+        print("Warnings:")
+        for failure in result["failures"]:
+            print(f" - {failure}")
+
+
+if __name__ == "__main__":
+    main()
