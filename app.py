@@ -2,6 +2,7 @@ import os
 import sqlite3
 import threading
 import time
+import logging
 from pathlib import Path
 from urllib.parse import quote
 
@@ -16,13 +17,24 @@ OUTPUT_DIR = BASE_DIR / "output"
 DB_PATH = BASE_DIR / "app.db"
 WATCHER_POLL_SECONDS = 60
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 
 
 def get_db_connection() -> sqlite3.Connection:
-    connection = sqlite3.connect(DB_PATH)
+    connection = sqlite3.connect(DB_PATH, timeout=30)
     connection.row_factory = sqlite3.Row
     return connection
+
+
+def safe_list_watchers() -> list[sqlite3.Row]:
+    try:
+        return list_watchers()
+    except Exception:
+        logger.exception("Failed to load watchers")
+        return []
 
 
 def init_db() -> None:
@@ -368,6 +380,7 @@ def index():
     result = None
     error = None
     info = None
+    watchers = safe_list_watchers()
 
     defaults = {
         "query": "",
@@ -442,17 +455,22 @@ def index():
                     output_dir=OUTPUT_DIR,
                 )
         except Exception as exc:
+            logger.exception("Request handling failed")
             error = str(exc)
 
-    return render_template(
-        "index.html",
-        geo_options=GEO_DOMAINS,
-        defaults=defaults,
-        watchers=list_watchers(),
-        result=result,
-        error=error,
-        info=info,
-    )
+    try:
+        return render_template(
+            "index.html",
+            geo_options=GEO_DOMAINS,
+            defaults=defaults,
+            watchers=watchers,
+            result=result,
+            error=error,
+            info=info,
+        )
+    except Exception as exc:
+        logger.exception("Template render failed")
+        return f"Internal server error: {exc}", 500
 
 
 @app.get("/download/<fmt>/<path:filename>")
