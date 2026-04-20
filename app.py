@@ -37,6 +37,72 @@ def safe_list_watchers() -> list[sqlite3.Row]:
         return []
 
 
+def list_favorites() -> list[sqlite3.Row]:
+    with get_db_connection() as connection:
+        return connection.execute(
+            """
+            SELECT
+                item_id, title, subtitle, brand, size, condition, price, total_price, currency,
+                image_url, item_url, search_url, geo, seller_country, seller_city,
+                seller_last_online, listing_age_minutes, listing_age_label, created_at
+            FROM favorites
+            ORDER BY created_at DESC, item_url DESC
+            """
+        ).fetchall()
+
+
+def get_favorite_urls() -> set[str]:
+    return {row["item_url"] for row in list_favorites()}
+
+
+def toggle_favorite(form: dict[str, str]) -> bool:
+    item_url = form.get("item_url", "").strip()
+    if not item_url:
+        raise ValueError("Favorite item URL is required.")
+
+    with get_db_connection() as connection:
+        exists = connection.execute(
+            "SELECT 1 FROM favorites WHERE item_url = ?",
+            (item_url,),
+        ).fetchone()
+        if exists:
+            connection.execute("DELETE FROM favorites WHERE item_url = ?", (item_url,))
+            connection.commit()
+            return False
+
+        connection.execute(
+            """
+            INSERT INTO favorites (
+                item_id, title, subtitle, brand, size, condition, price, total_price, currency,
+                image_url, item_url, search_url, geo, seller_country, seller_city,
+                seller_last_online, listing_age_minutes, listing_age_label
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                form.get("item_id", "").strip(),
+                form.get("title", "").strip(),
+                form.get("subtitle", "").strip(),
+                form.get("brand", "").strip(),
+                form.get("size", "").strip(),
+                form.get("condition", "").strip(),
+                form.get("price", "").strip(),
+                form.get("total_price", "").strip(),
+                form.get("currency", "").strip(),
+                form.get("image_url", "").strip(),
+                item_url,
+                form.get("search_url", "").strip(),
+                form.get("item_geo", form.get("geo", "")).strip(),
+                form.get("seller_country", "").strip(),
+                form.get("seller_city", "").strip(),
+                form.get("seller_last_online", "").strip(),
+                safe_int(form.get("listing_age_minutes", "").strip()),
+                form.get("listing_age_label", "").strip(),
+            ),
+        )
+        connection.commit()
+    return True
+
+
 def init_db() -> None:
     with get_db_connection() as connection:
         connection.execute(
@@ -123,6 +189,31 @@ def init_db() -> None:
                 first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (watcher_id, item_url),
                 FOREIGN KEY (watcher_id) REFERENCES watchers(id) ON DELETE CASCADE
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS favorites (
+                item_url TEXT PRIMARY KEY,
+                item_id TEXT,
+                title TEXT NOT NULL,
+                subtitle TEXT,
+                brand TEXT,
+                size TEXT,
+                condition TEXT,
+                price TEXT,
+                total_price TEXT,
+                currency TEXT,
+                image_url TEXT,
+                search_url TEXT,
+                geo TEXT,
+                seller_country TEXT,
+                seller_city TEXT,
+                seller_last_online TEXT,
+                listing_age_minutes INTEGER,
+                listing_age_label TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
@@ -311,6 +402,7 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
                         "price": item.price,
                         "geo": item.geo.upper(),
                         "item_url": item.item_url,
+                        "age_minutes": item.listing_age_minutes,
                     }
                 )
             connection.commit()
@@ -322,7 +414,9 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
             stale_items = 0
             unknown_age_items = 0
             for item in new_items:
-                age_minutes = get_item_age_minutes(session, item["item_url"], timeout=30)
+                age_minutes = item.get("age_minutes")
+                if age_minutes is None:
+                    age_minutes = get_item_age_minutes(session, item["item_url"], timeout=30)
                 if age_minutes is None:
                     unknown_age_items += 1
                     continue
@@ -381,6 +475,8 @@ def index():
     error = None
     info = None
     watchers = safe_list_watchers()
+    favorites = list_favorites()
+    favorite_urls = {row["item_url"] for row in favorites}
 
     defaults = {
         "query": "",
@@ -440,6 +536,23 @@ def index():
                 watcher_id = int(form.get("watcher_id", "0"))
                 new_count, total_count = run_single_watcher(watcher_id)
                 info = f"Watcher checked successfully. New items: {new_count}. Total unique in current scan: {total_count}."
+            elif action == "toggle_favorite":
+                added = toggle_favorite(form)
+                info = "Added to favorites." if added else "Removed from favorites."
+                if defaults["query"]:
+                    geos = expand_geos(defaults["selected_geos"] or ["fr"])
+                    raw_extra = [line.strip() for line in defaults["extra_params"].splitlines() if line.strip()]
+                    result = run_search(
+                        query=defaults["query"],
+                        geos=geos,
+                        pages=int(defaults["pages"]),
+                        delay=float(defaults["delay"]),
+                        order=defaults["order"],
+                        price_from=safe_int(defaults["price_from"]),
+                        price_to=safe_int(defaults["price_to"]),
+                        extra_params=parse_extra_params(raw_extra),
+                        output_dir=OUTPUT_DIR,
+                    )
             else:
                 geos = expand_geos(defaults["selected_geos"] or ["fr"])
                 raw_extra = [line.strip() for line in defaults["extra_params"].splitlines() if line.strip()]
@@ -458,12 +571,17 @@ def index():
             logger.exception("Request handling failed")
             error = str(exc)
 
+    favorites = list_favorites()
+    favorite_urls = {row["item_url"] for row in favorites}
+
     try:
         return render_template(
             "index.html",
             geo_options=GEO_DOMAINS,
             defaults=defaults,
             watchers=watchers,
+            favorites=favorites,
+            favorite_urls=favorite_urls,
             result=result,
             error=error,
             info=info,

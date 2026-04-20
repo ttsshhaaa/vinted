@@ -346,6 +346,66 @@
       gap: 14px;
     }
 
+    .section-title-row,
+    .card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .favorite-btn {
+      border: 1px solid var(--line);
+      background: rgba(20, 20, 20, 0.95);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 10px;
+      font-size: 16px;
+      cursor: pointer;
+      line-height: 1;
+    }
+
+    .favorite-btn.active {
+      color: #ff7a98;
+      border-color: rgba(255, 122, 152, 0.45);
+      background: rgba(83, 24, 39, 0.75);
+    }
+
+    .favorites-list {
+      display: grid;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .favorite-card {
+      display: grid;
+      grid-template-columns: 84px 1fr;
+      gap: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(16, 16, 16, 0.98);
+    }
+
+    .favorite-thumb {
+      width: 84px;
+      height: 112px;
+      border-radius: 14px;
+      overflow: hidden;
+      background: #111;
+    }
+
+    .favorite-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .favorite-body {
+      min-width: 0;
+    }
+
     .thumb {
       aspect-ratio: 3 / 4;
       background: #111;
@@ -609,6 +669,41 @@
             </div>
           {% endfor %}
         </div>
+
+        <div class="section-title-row" style="margin-top:22px;">
+          <h2 class="panel-title" style="margin:0;">Favorites</h2>
+          <span class="badge">{{ favorites|length }}</span>
+        </div>
+        {% if favorites %}
+          <div class="favorites-list">
+            {% for item in favorites %}
+              <article class="favorite-card">
+                <div class="favorite-thumb">
+                  {% if item["image_url"] %}
+                    <img src="{{ item["image_url"] }}" alt="{{ item["title"] }}">
+                  {% endif %}
+                </div>
+                <div class="favorite-body">
+                  <div class="title" style="min-height:auto; margin-bottom:6px;">{{ item["title"] }}</div>
+                  <div class="meta">{{ item["geo"]|upper }}{% if item["seller_country"] %} · {{ item["seller_country"] }}{% endif %}{% if item["seller_city"] %} · {{ item["seller_city"] }}{% endif %}</div>
+                  <div class="meta">Listed: {{ item["listing_age_label"] or "unknown" }}</div>
+                  <div class="meta">Seller online: {{ item["seller_last_online"] or "unknown" }}</div>
+                  <div class="price"><strong>{{ item["price"] or "n/a" }}</strong>{% if item["total_price"] %} · {{ item["total_price"] }} total{% endif %}</div>
+                  <div class="toolbar" style="margin:10px 0 0;">
+                    <a class="ghost" href="{{ item["item_url"] }}" target="_blank" rel="noreferrer">Open</a>
+                    <form method="post">
+                      <input type="hidden" name="action" value="toggle_favorite">
+                      <input type="hidden" name="item_url" value="{{ item["item_url"] }}">
+                      <button class="favorite-btn active" type="submit">♥</button>
+                    </form>
+                  </div>
+                </div>
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="empty" style="padding:18px; margin-top:16px;">No favorites yet.</div>
+        {% endif %}
       </section>
 
       <section class="panel">
@@ -654,11 +749,53 @@
                   {% endif %}
                 </div>
                 <div class="card-body">
-                  <div class="chip">{{ item.geo|upper }}</div>
+                  <div class="card-top">
+                    <div class="chip">{{ item.geo|upper }}</div>
+                    <form method="post">
+                      <input type="hidden" name="action" value="toggle_favorite">
+                      <input type="hidden" name="query" value="{{ defaults.query }}">
+                      <input type="hidden" name="pages" value="{{ defaults.pages }}">
+                      <input type="hidden" name="price_from" value="{{ defaults.price_from }}">
+                      <input type="hidden" name="price_to" value="{{ defaults.price_to }}">
+                      <input type="hidden" name="order" value="{{ defaults.order }}">
+                      <input type="hidden" name="delay" value="{{ defaults.delay }}">
+                      <input type="hidden" name="extra_params" value="{{ defaults.extra_params }}">
+                      <input type="hidden" name="watcher_name" value="{{ defaults.watcher_name }}">
+                      <input type="hidden" name="discord_webhook_url" value="{{ defaults.discord_webhook_url }}">
+                      <input type="hidden" name="interval_minutes" value="{{ defaults.interval_minutes }}">
+                      {% for geo in defaults.selected_geos %}
+                        <input type="hidden" name="geo" value="{{ geo }}">
+                      {% endfor %}
+                      <input type="hidden" name="item_id" value="{{ item.item_id }}">
+                      <input type="hidden" name="title" value="{{ item.title }}">
+                      <input type="hidden" name="subtitle" value="{{ item.subtitle }}">
+                      <input type="hidden" name="brand" value="{{ item.brand }}">
+                      <input type="hidden" name="size" value="{{ item.size }}">
+                      <input type="hidden" name="condition" value="{{ item.condition }}">
+                      <input type="hidden" name="price" value="{{ item.price }}">
+                      <input type="hidden" name="total_price" value="{{ item.total_price }}">
+                      <input type="hidden" name="currency" value="{{ item.currency }}">
+                      <input type="hidden" name="image_url" value="{{ item.image_url }}">
+                      <input type="hidden" name="item_url" value="{{ item.item_url }}">
+                      <input type="hidden" name="search_url" value="{{ item.search_url }}">
+                      <input type="hidden" name="item_geo" value="{{ item.geo }}">
+                      <input type="hidden" name="seller_country" value="{{ item.seller_country }}">
+                      <input type="hidden" name="seller_city" value="{{ item.seller_city }}">
+                      <input type="hidden" name="seller_last_online" value="{{ item.seller_last_online }}">
+                      <input type="hidden" name="listing_age_minutes" value="{{ item.listing_age_minutes if item.listing_age_minutes is not none else '' }}">
+                      <input type="hidden" name="listing_age_label" value="{{ item.listing_age_label }}">
+                      <button class="favorite-btn {% if item.item_url in favorite_urls %}active{% endif %}" type="submit">
+                        {% if item.item_url in favorite_urls %}♥{% else %}♡{% endif %}
+                      </button>
+                    </form>
+                  </div>
                   <div class="title">{{ item.title }}</div>
                   <div class="price"><strong>{{ item.price or "n/a" }}</strong>{% if item.total_price %} · {{ item.total_price }} total{% endif %}</div>
                   <div class="meta">{{ item.brand or "Unknown brand" }}</div>
                   <div class="meta">{{ item.subtitle or "No subtitle" }}</div>
+                  <div class="meta">Seller geo: {{ item.seller_country or "unknown" }}{% if item.seller_city %} · {{ item.seller_city }}{% endif %}</div>
+                  <div class="meta">Listed: {{ item.listing_age_label or "unknown" }}</div>
+                  <div class="meta">Seller online: {{ item.seller_last_online or "unknown" }}</div>
                   <a class="ghost" href="{{ item.item_url }}" target="_blank" rel="noreferrer">Open Listing</a>
                 </div>
               </article>

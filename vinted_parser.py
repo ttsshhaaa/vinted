@@ -42,6 +42,26 @@ GEO_DOMAINS = {
     "lt": "https://www.vinted.lt",
 }
 
+GEO_ALLOWED_COUNTRIES = {
+    "us": {"united states", "usa", "etats-unis", "états-unis"},
+    "uk": {"united kingdom", "great britain", "royaume-uni"},
+    "fr": {"france"},
+    "de": {"deutschland", "germany"},
+    "it": {"italia", "italy"},
+    "es": {"españa", "espana", "spain"},
+    "nl": {"nederland", "netherlands"},
+    "be": {"belgië / belgique", "belgie / belgique", "belgique", "belgië", "belgie"},
+    "pt": {"portugal"},
+    "pl": {"polska", "poland"},
+    "cz": {"česko", "cesko", "czechia", "czech republic"},
+    "sk": {"slovensko", "slovakia"},
+    "at": {"österreich", "osterreich", "austria"},
+    "hu": {"magyarország", "magyarorszag", "hungary"},
+    "ro": {"românia", "romania"},
+    "hr": {"hrvatska", "croatia"},
+    "lt": {"lietuva", "lithuania"},
+}
+
 
 @dataclass
 class Item:
@@ -58,6 +78,11 @@ class Item:
     image_url: str
     item_url: str
     search_url: str
+    seller_country: str = ""
+    seller_city: str = ""
+    seller_last_online: str = ""
+    listing_age_minutes: int | None = None
+    listing_age_label: str = ""
 
 
 AGE_PATTERNS = [
@@ -135,6 +160,32 @@ def expand_geos(raw_geo: str | Iterable[str]) -> list[str]:
 
 def clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
+
+
+def normalize_country_name(value: str) -> str:
+    return clean_text(value).replace("\\/", "/").casefold()
+
+
+def format_age_label(minutes: int | None) -> str:
+    if minutes is None:
+        return ""
+    if minutes < 60:
+        return f"{minutes} min ago"
+    if minutes < 1440:
+        return f"{minutes // 60} h ago"
+    if minutes < 10080:
+        return f"{minutes // 1440} d ago"
+    return f"{minutes // 10080} w ago"
+
+
+def format_last_online(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    return parsed.strftime("%Y-%m-%d %H:%M %z")
 
 
 def extract_currency(*values: str) -> str:
@@ -228,12 +279,7 @@ def fetch_html(session: requests.Session, url: str, timeout: int) -> str:
     return response.content.decode("utf-8", errors="replace")
 
 
-def get_item_age_minutes(session: requests.Session, item_url: str, timeout: int = 30) -> int | None:
-    try:
-        html = fetch_html(session, item_url, timeout=timeout)
-    except requests.RequestException:
-        return None
-
+def extract_item_age_minutes_from_html(html: str) -> int | None:
     soup = BeautifulSoup(html, "html.parser")
     for text in soup.stripped_strings:
         normalized = clean_text(text)
@@ -245,6 +291,61 @@ def get_item_age_minutes(session: requests.Session, item_url: str, timeout: int 
             if match:
                 return int(match.group(1)) * multiplier
     return None
+
+
+def get_item_age_minutes(
+    session: requests.Session,
+    item_url: str,
+    timeout: int = 30,
+    html: str | None = None,
+) -> int | None:
+    if html is None:
+        try:
+            html = fetch_html(session, item_url, timeout=timeout)
+        except requests.RequestException:
+            return None
+    return extract_item_age_minutes_from_html(html)
+
+
+def extract_seller_details_from_html(html: str) -> tuple[str, str, str]:
+    country_match = re.search(r'country_title_local\\":\\"([^"]+)\\"', html)
+    if not country_match:
+        return "", "", ""
+
+    snippet = html[country_match.start():country_match.start() + 500]
+    country = clean_text(country_match.group(1).replace("\\/", "/"))
+
+    last_online_match = re.search(r'last_logged_on_ts\\":\\"([^"]+)\\"', snippet)
+    city_match = re.search(r'city\\":\\"([^"]*)\\"', snippet)
+    return (
+        country,
+        clean_text(city_match.group(1).replace("\\/", "/")) if city_match else "",
+        format_last_online(last_online_match.group(1)) if last_online_match else "",
+    )
+
+
+def item_matches_requested_geo(item_geo: str, seller_country: str) -> bool:
+    if not seller_country:
+        return True
+    allowed_countries = GEO_ALLOWED_COUNTRIES.get(item_geo, set())
+    if not allowed_countries:
+        return True
+    return normalize_country_name(seller_country) in allowed_countries
+
+
+def enrich_item_details(session: requests.Session, item: Item, timeout: int) -> Item | None:
+    html = fetch_html(session, item.item_url, timeout=timeout)
+    seller_country, seller_city, seller_last_online = extract_seller_details_from_html(html)
+    if seller_country and not item_matches_requested_geo(item.geo, seller_country):
+        return None
+
+    listing_age_minutes = extract_item_age_minutes_from_html(html)
+    item.seller_country = seller_country
+    item.seller_city = seller_city
+    item.seller_last_online = seller_last_online
+    item.listing_age_minutes = listing_age_minutes
+    item.listing_age_label = format_age_label(listing_age_minutes)
+    return item
 
 
 def scrape_geo(
@@ -274,8 +375,20 @@ def scrape_geo(
         )
         html = fetch_html(session, search_url, timeout=timeout)
         page_items = parse_items(html, geo=geo, search_url=search_url)
-        print(f"[{geo}] page={page} items={len(page_items)} url={search_url}")
-        all_items.extend(page_items)
+        filtered_items: list[Item] = []
+        for item in page_items:
+            try:
+                enriched_item = enrich_item_details(session, item, timeout=timeout)
+            except requests.RequestException:
+                continue
+            if enriched_item is None:
+                continue
+            filtered_items.append(enriched_item)
+
+        print(
+            f"[{geo}] page={page} raw_items={len(page_items)} filtered_items={len(filtered_items)} url={search_url}"
+        )
+        all_items.extend(filtered_items)
 
         if page < pages and delay > 0:
             time.sleep(delay)
