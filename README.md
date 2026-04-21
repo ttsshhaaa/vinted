@@ -25,8 +25,12 @@ Change it after first login in production.
 2. Mount it, for example, to `/app/data`.
 3. Add env var `DATA_DIR=/app/data`.
 4. Add env var `FLASK_SECRET_KEY` with a long random value.
-5. Keep a single web worker/replica for the built-in watcher loop.
-6. Redeploy.
+5. Optional but recommended for hosted deployments:
+   - `SEARCH_MODE=lite`
+   - `GEO_COOLDOWN_SECONDS=1800`
+   - `DETAIL_CACHE_TTL_SECONDS=21600`
+6. Keep a single web worker/replica for the built-in watcher loop.
+7. Redeploy.
 
 The app will then store:
 - SQLite DB at `/app/data/app.db`

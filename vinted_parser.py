@@ -1,6 +1,7 @@
 import argparse
 import csv
 import json
+import os
 import re
 import time
 import unicodedata
@@ -31,6 +32,12 @@ API_HEADERS = {
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
 }
+
+SEARCH_MODE = os.environ.get("SEARCH_MODE", "lite").strip().lower() or "lite"
+DETAIL_CACHE_TTL_SECONDS = int(os.environ.get("DETAIL_CACHE_TTL_SECONDS", "21600"))
+GEO_COOLDOWN_SECONDS = int(os.environ.get("GEO_COOLDOWN_SECONDS", "1800"))
+DETAIL_CACHE: dict[str, tuple[float, tuple[str, str, str, int | None]]] = {}
+GEO_COOLDOWNS: dict[str, float] = {}
 
 GEO_DOMAINS = {
     "us": "https://www.vinted.com",
@@ -404,6 +411,15 @@ def request_catalog_api(
     raise requests.RequestException("Unknown Vinted catalog API failure")
 
 
+def is_geo_in_cooldown(geo: str) -> bool:
+    until = GEO_COOLDOWNS.get(geo)
+    return bool(until and until > time.time())
+
+
+def mark_geo_cooldown(geo: str) -> None:
+    GEO_COOLDOWNS[geo] = time.time() + GEO_COOLDOWN_SECONDS
+
+
 def format_money(raw_value: dict | None) -> str:
     if not raw_value:
         return ""
@@ -548,6 +564,30 @@ def get_item_age_minutes(
     return extract_item_age_minutes_from_html(html)
 
 
+def get_cached_item_details(item_url: str) -> tuple[str, str, str, int | None] | None:
+    cached = DETAIL_CACHE.get(item_url)
+    if not cached:
+        return None
+    cached_at, payload = cached
+    if time.time() - cached_at > DETAIL_CACHE_TTL_SECONDS:
+        DETAIL_CACHE.pop(item_url, None)
+        return None
+    return payload
+
+
+def set_cached_item_details(
+    item_url: str,
+    seller_country: str,
+    seller_city: str,
+    seller_last_online: str,
+    listing_age_minutes: int | None,
+) -> None:
+    DETAIL_CACHE[item_url] = (
+        time.time(),
+        (seller_country, seller_city, seller_last_online, listing_age_minutes),
+    )
+
+
 def extract_seller_details_from_html(html: str) -> tuple[str, str, str]:
     country_match = re.search(r'country_title_local\\":\\"([^"]+)\\"', html)
     if not country_match:
@@ -577,12 +617,31 @@ def item_matches_requested_geo(item_geo: str, seller_country: str) -> bool:
 
 
 def enrich_item_details(session: requests.Session, item: Item, timeout: int) -> Item | None:
+    cached = get_cached_item_details(item.item_url)
+    if cached:
+        seller_country, seller_city, seller_last_online, listing_age_minutes = cached
+        if not item_matches_requested_geo(item.geo, seller_country):
+            return None
+        item.seller_country = seller_country
+        item.seller_city = seller_city
+        item.seller_last_online = seller_last_online
+        item.listing_age_minutes = listing_age_minutes
+        item.listing_age_label = format_age_label(listing_age_minutes)
+        return item
+
     html = fetch_html(session, item.item_url, timeout=timeout)
     seller_country, seller_city, seller_last_online = extract_seller_details_from_html(html)
     if not item_matches_requested_geo(item.geo, seller_country):
         return None
 
     listing_age_minutes = extract_item_age_minutes_from_html(html)
+    set_cached_item_details(
+        item.item_url,
+        seller_country,
+        seller_city,
+        seller_last_online,
+        listing_age_minutes,
+    )
     item.seller_country = seller_country
     item.seller_city = seller_city
     item.seller_last_online = seller_last_online
@@ -595,6 +654,8 @@ def safe_enrich_item_details(session: requests.Session, item: Item, timeout: int
     try:
         return enrich_item_details(session, item, timeout=timeout)
     except requests.RequestException:
+        if SEARCH_MODE == "lite":
+            return item
         return item
 
 
@@ -613,6 +674,10 @@ def scrape_geo(
     base_url = GEO_DOMAINS[geo]
     api_url = build_catalog_api_url(base_url)
     all_items: list[Item] = []
+    if is_geo_in_cooldown(geo):
+        raise requests.RequestException(
+            f"[{geo}] cooldown active after recent Vinted block; retry later"
+        )
     bootstrap_session(session, base_url, timeout)
 
     for page in range(1, pages + 1):
@@ -652,16 +717,19 @@ def scrape_geo(
 
         page_items = [item for item in page_items if item_matches_query_text(item, query)]
         filtered_items: list[Item] = []
-        max_workers = min(6, max(1, len(page_items)))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            enriched_items = executor.map(
-                lambda current_item: safe_enrich_item_details(session, current_item, timeout),
-                page_items,
-            )
-            for enriched_item in enriched_items:
-                if enriched_item is None:
-                    continue
-                filtered_items.append(enriched_item)
+        if SEARCH_MODE == "lite":
+            filtered_items = page_items
+        else:
+            max_workers = min(4, max(1, len(page_items)))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                enriched_items = executor.map(
+                    lambda current_item: safe_enrich_item_details(session, current_item, timeout),
+                    page_items,
+                )
+                for enriched_item in enriched_items:
+                    if enriched_item is None:
+                        continue
+                    filtered_items.append(enriched_item)
 
         print(
             f"[{geo}] page={page} raw_items={len(page_items)} filtered_items={len(filtered_items)} url={search_url}"
@@ -747,6 +815,8 @@ def run_search(
                 )
             )
         except requests.RequestException as exc:
+            if "403" in str(exc):
+                mark_geo_cooldown(geo)
             failures.append(f"[{geo}] {exc}")
 
     unique_items = sort_items_by_query_relevance(dedupe_items(all_items), query)
