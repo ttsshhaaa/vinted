@@ -77,13 +77,13 @@
         <div class="metric"><div class="label">Watchers</div><div class="value">{{ watchers|length }}</div></div>
         <div class="metric"><div class="label">Favorites</div><div class="value">{{ favorites|length }}</div></div>
         <div class="metric"><div class="label">Geos</div><div class="value">{{ geo_options|length }}</div></div>
-        <div class="metric"><div class="label">Results</div><div class="value">{{ result.unique_count if result else 0 }}</div></div>
+        <div class="metric"><div class="label">Results</div><div class="value">{{ result["unique_count"] if result else 0 }}</div></div>
       </div>
       {% if result %}
       <div class="inline" style="margin-bottom:14px;">
-        <a class="btn secondary" href="{{ url_for('download', fmt='json', filename=result.json_path|basename) }}">Download JSON</a>
-        <a class="btn secondary" href="{{ url_for('download', fmt='csv', filename=result.csv_path|basename) }}">Download CSV</a>
-        <span class="muted small">Raw: {{ result.raw_count }} • Unique: {{ result.unique_count }}</span>
+        <a class="btn secondary" href="{{ url_for('download', fmt='json', filename=result['json_path']|basename) }}">Download JSON</a>
+        <a class="btn secondary" href="{{ url_for('download', fmt='csv', filename=result['csv_path']|basename) }}">Download CSV</a>
+        <span class="muted small">Raw: {{ result["raw_count"] }} • Unique: {{ result["unique_count"] }}</span>
       </div>
       {% endif %}
       <h2 style="margin-top:0;">Active watchers</h2>
@@ -107,9 +107,9 @@
 
     <div class="panel">
       <h2 style="margin-top:0;">Search results</h2>
-      {% if result and result.items %}
+      {% if result and result["items"] %}
       <div class="item-grid">
-        {% for item in result.items %}
+        {% for item in result["items"] %}
         <div class="card item-card">
           {% if item.image_url %}<img src="{{ item.image_url }}" alt="{{ item.title }}">{% endif %}
           <div class="space"><strong>{{ item.title }}</strong><span class="pill">{{ item.geo|upper }}</span></div>
