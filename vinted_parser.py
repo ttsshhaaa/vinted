@@ -158,12 +158,59 @@ class Item:
     listing_age_label: str = ""
 
 
-AGE_PATTERNS = [
-    (re.compile(r"(\d+)\s*(?:minute|minutes|min)\b", re.IGNORECASE), 1),
-    (re.compile(r"(\d+)\s*(?:heure|heures|hour|hours)\b", re.IGNORECASE), 60),
-    (re.compile(r"(\d+)\s*(?:jour|jours|day|days)\b", re.IGNORECASE), 1440),
-    (re.compile(r"(\d+)\s*(?:semaine|semaines|week|weeks)\b", re.IGNORECASE), 10080),
+RELATIVE_AGE_PATTERNS = [
+    re.compile(
+        r"(?:uploaded|added|posted)\s+((?:a|an|one|\d+))\s+"
+        r"(minute|minutes|min|hour|hours|day|days|week|weeks|month|months|year|years)\s+ago",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:uploaded|added|posted)\s+just\s+now",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:mise\s+en\s+ligne|ajoute|ajout[eé])\s+(?:il\s+y\s+a\s+)?((?:un|une|\d+))\s+"
+        r"(minute|minutes|heure|heures|jour|jours|semaine|semaines|mois|an|ans)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:mise\s+en\s+ligne|ajoute|ajout[eé])\s+(?:à\s+l'instant|a\s+l'instant)",
+        re.IGNORECASE,
+    ),
 ]
+
+AGE_UNIT_MINUTES = {
+    "minute": 1,
+    "minutes": 1,
+    "min": 1,
+    "hour": 60,
+    "hours": 60,
+    "heure": 60,
+    "heures": 60,
+    "day": 1440,
+    "days": 1440,
+    "jour": 1440,
+    "jours": 1440,
+    "week": 10080,
+    "weeks": 10080,
+    "semaine": 10080,
+    "semaines": 10080,
+    "month": 43200,
+    "months": 43200,
+    "mois": 43200,
+    "year": 525600,
+    "years": 525600,
+    "an": 525600,
+    "ans": 525600,
+}
+
+AGE_VALUE_ALIASES = {
+    "a": 1,
+    "an": 1,
+    "one": 1,
+    "un": 1,
+    "une": 1,
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -547,15 +594,28 @@ def fetch_html(session: requests.Session, url: str, timeout: int) -> str:
 
 def extract_item_age_minutes_from_html(html: str) -> int | None:
     soup = BeautifulSoup(html, "html.parser")
-    for text in soup.stripped_strings:
-        normalized = clean_text(text)
-        lower = normalized.lower()
-        if not any(token in lower for token in ("ajout", "added", "il y a", "ago")):
+    page_text = clean_text(soup.get_text(" ", strip=True))
+    if not page_text:
+        return None
+
+    for pattern in RELATIVE_AGE_PATTERNS:
+        match = pattern.search(page_text)
+        if not match:
             continue
-        for pattern, multiplier in AGE_PATTERNS:
-            match = pattern.search(lower)
-            if match:
-                return int(match.group(1)) * multiplier
+        if match.lastindex is None:
+            return 0
+        raw_value = str(match.group(1)).strip().lower()
+        raw_unit = str(match.group(2)).strip().lower() if match.lastindex >= 2 else ""
+        amount = AGE_VALUE_ALIASES.get(raw_value)
+        if amount is None:
+            try:
+                amount = int(raw_value)
+            except ValueError:
+                continue
+        multiplier = AGE_UNIT_MINUTES.get(raw_unit)
+        if multiplier is None:
+            continue
+        return amount * multiplier
     return None
 
 
