@@ -164,7 +164,8 @@
       <h2 style="margin-top:0;">Favorites</h2>
       <div class="cards">
         {% for item in favorites %}
-        <div class="card">
+        <div class="card item-card">
+          {% if item.image_url %}<img src="{{ item.image_url }}" alt="{{ item.title }}">{% endif %}
           <div class="space"><strong>{{ item.title }}</strong><span class="pill">{{ (item.geo or '')|upper }}</span></div>
           <div class="small muted">{{ item.price }}{% if item.total_price %} • {{ item.total_price }}{% endif %}</div>
           <div class="small muted">{{ item.seller_country or 'unknown' }}{% if item.seller_city %} / {{ item.seller_city }}{% endif %}</div>
