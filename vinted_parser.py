@@ -4,6 +4,7 @@ import json
 import re
 import time
 import unicodedata
+from difflib import SequenceMatcher
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -227,6 +228,14 @@ def clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def normalize_search_text(value: str) -> str:
+    normalized = clean_text(value)
+    normalized = unicodedata.normalize("NFKD", normalized)
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    normalized = re.sub(r"[^a-zA-Z0-9]+", " ", normalized)
+    return clean_text(normalized).casefold()
+
+
 def normalize_country_name(value: str) -> str:
     normalized = clean_text(value).replace("\\/", "/")
     normalized = unicodedata.normalize("NFKD", normalized)
@@ -267,6 +276,41 @@ def split_subtitle(subtitle: str) -> tuple[str, str]:
     size = parts[0] if len(parts) >= 1 else ""
     condition = parts[-1] if len(parts) >= 2 else ""
     return size, condition
+
+
+def token_matches_query_token(query_token: str, candidate_tokens: list[str]) -> bool:
+    for candidate in candidate_tokens:
+        if query_token == candidate:
+            return True
+        if len(query_token) >= 4 and (query_token in candidate or candidate in query_token):
+            return True
+        if len(query_token) >= 4 and SequenceMatcher(None, query_token, candidate).ratio() >= 0.86:
+            return True
+    return False
+
+
+def item_matches_query_text(item: "Item", query: str) -> bool:
+    normalized_query = normalize_search_text(query)
+    if not normalized_query:
+        return True
+
+    haystack = normalize_search_text(" ".join([item.title, item.brand, item.subtitle]))
+    if not haystack:
+        return False
+    if normalized_query in haystack:
+        return True
+
+    query_tokens = [token for token in normalized_query.split() if len(token) >= 2]
+    haystack_tokens = [token for token in haystack.split() if len(token) >= 2]
+    if not query_tokens or not haystack_tokens:
+        return False
+
+    matched_tokens = sum(
+        1 for query_token in query_tokens if token_matches_query_token(query_token, haystack_tokens)
+    )
+    if len(query_tokens) == 1:
+        return matched_tokens == 1
+    return matched_tokens == len(query_tokens)
 
 
 def build_search_url(
@@ -585,6 +629,7 @@ def scrape_geo(
             html = fetch_html(session, search_url, timeout=timeout)
             page_items = parse_items(html, geo=geo, search_url=search_url)
 
+        page_items = [item for item in page_items if item_matches_query_text(item, query)]
         filtered_items: list[Item] = []
         max_workers = min(6, max(1, len(page_items)))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
