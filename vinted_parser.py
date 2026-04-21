@@ -99,6 +99,34 @@ GEO_ALLOWED_COUNTRIES = {
     for geo, aliases in GEO_ALLOWED_COUNTRIES.items()
 }
 
+GEO_RELATED_MARKETS = {
+    "uk": {"ie", "fr"},
+    "fr": {"be", "nl", "lu", "es", "pt", "it", "de", "ie"},
+    "de": {"at", "nl", "be", "lu", "fr", "dk", "pl", "cz"},
+    "it": {"fr", "es", "pt", "si", "hr", "at"},
+    "es": {"pt", "fr", "it"},
+    "nl": {"be", "lu", "fr", "de", "dk"},
+    "be": {"nl", "fr", "lu", "de"},
+    "pt": {"es", "fr", "it"},
+    "pl": {"cz", "sk", "de", "lt", "lv", "dk"},
+    "cz": {"sk", "pl", "de", "at", "hu"},
+    "sk": {"cz", "pl", "hu", "at"},
+    "at": {"de", "cz", "sk", "hu", "it", "si"},
+    "hu": {"sk", "at", "ro", "hr", "si", "cz"},
+    "ro": {"hu", "bg", "gr"},
+    "hr": {"si", "hu", "it"},
+    "lt": {"lv", "ee", "pl"},
+    "ee": {"lv", "lt", "fi"},
+    "lu": {"fr", "be", "de", "nl"},
+    "lv": {"lt", "ee", "pl"},
+    "se": {"dk", "fi", "de"},
+    "si": {"hr", "at", "it", "hu"},
+    "dk": {"se", "fi", "de", "nl", "pl"},
+    "fi": {"se", "ee", "dk"},
+    "gr": {"ro", "it"},
+    "ie": {"uk", "fr"},
+}
+
 
 @dataclass
 class Item:
@@ -474,8 +502,10 @@ def extract_seller_details_from_html(html: str) -> tuple[str, str, str]:
 
 def item_matches_requested_geo(item_geo: str, seller_country: str) -> bool:
     if not seller_country:
-        return False
-    allowed_countries = GEO_ALLOWED_COUNTRIES.get(item_geo, set())
+        return True
+    allowed_countries = set(GEO_ALLOWED_COUNTRIES.get(item_geo, set()))
+    for related_geo in GEO_RELATED_MARKETS.get(item_geo, set()):
+        allowed_countries.update(GEO_ALLOWED_COUNTRIES.get(related_geo, set()))
     if not allowed_countries:
         return True
     return normalize_country_name(seller_country) in allowed_countries
@@ -500,7 +530,7 @@ def safe_enrich_item_details(session: requests.Session, item: Item, timeout: int
     try:
         return enrich_item_details(session, item, timeout=timeout)
     except requests.RequestException:
-        return None
+        return item
 
 
 def scrape_geo(
