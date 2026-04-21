@@ -3,6 +3,7 @@ import csv
 import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -348,6 +349,13 @@ def enrich_item_details(session: requests.Session, item: Item, timeout: int) -> 
     return item
 
 
+def safe_enrich_item_details(session: requests.Session, item: Item, timeout: int) -> Item | None:
+    try:
+        return enrich_item_details(session, item, timeout=timeout)
+    except requests.RequestException:
+        return item
+
+
 def scrape_geo(
     session: requests.Session,
     geo: str,
@@ -376,14 +384,16 @@ def scrape_geo(
         html = fetch_html(session, search_url, timeout=timeout)
         page_items = parse_items(html, geo=geo, search_url=search_url)
         filtered_items: list[Item] = []
-        for item in page_items:
-            try:
-                enriched_item = enrich_item_details(session, item, timeout=timeout)
-            except requests.RequestException:
-                continue
-            if enriched_item is None:
-                continue
-            filtered_items.append(enriched_item)
+        max_workers = min(6, max(1, len(page_items)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            enriched_items = executor.map(
+                lambda current_item: safe_enrich_item_details(session, current_item, timeout),
+                page_items,
+            )
+            for enriched_item in enriched_items:
+                if enriched_item is None:
+                    continue
+                filtered_items.append(enriched_item)
 
         print(
             f"[{geo}] page={page} raw_items={len(page_items)} filtered_items={len(filtered_items)} url={search_url}"
