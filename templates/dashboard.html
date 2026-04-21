@@ -112,6 +112,11 @@
         <label>Interval minutes</label>
         <input name="interval_minutes" value="{{ defaults.interval_minutes }}">
       </div>
+      <div style="margin-bottom:12px;">
+        <label>Fresh only (minutes)</label>
+        <input name="watcher_fresh_minutes" value="{{ defaults.watcher_fresh_minutes }}">
+        <div class="small muted" style="margin-top:6px;">Watcher will notify only listings newer than this age window.</div>
+      </div>
         <button type="submit">Save watcher</button>
       </form>
   </div>
@@ -135,9 +140,11 @@
       <div class="cards">
         {% for watcher in watchers %}
         <div class="card">
-          <div class="space"><strong>{{ watcher.name }}</strong><span class="pill">{{ 'enabled' if watcher.enabled else 'paused' }}</span></div>
-          <div class="small muted">{{ watcher.query }} • {{ watcher.geos }} • every {{ watcher.interval_minutes }} min</div>
-          <div class="small muted" style="margin-top:8px;">Last run: {{ watcher.last_run_at or 'never' }}{% if watcher.last_error %} • {{ watcher.last_error }}{% endif %}</div>
+          <div class="space"><strong>{{ watcher.name }}</strong><span class="pill">{{ watcher.status_state }}</span></div>
+          <div class="small muted">{{ watcher.query }} • {{ watcher.geos }} • every {{ watcher.interval_minutes }} min • fresh <= {{ watcher.fresh_minutes }} min</div>
+          <div class="small muted" style="margin-top:8px;">Last run: {{ watcher.last_run_at or 'never' }} • Last success: {{ watcher.last_success_at or 'never' }}</div>
+          <div class="small muted" style="margin-top:6px;">Last sent: {{ watcher.last_notification_count or 0 }} item(s){% if watcher.last_notification_at %} • {{ watcher.last_notification_at }}{% endif %}</div>
+          <div class="small muted" style="margin-top:6px;">Last scan: {{ watcher.last_scan_count or 0 }} item(s){% if watcher.status_message %} • {{ watcher.status_message }}{% endif %}{% if watcher.last_error %} • {{ watcher.last_error }}{% endif %}</div>
           <div class="inline" style="margin-top:12px;">
             <form method="post"><input type="hidden" name="action" value="run_watcher"><input type="hidden" name="watcher_id" value="{{ watcher.id }}"><button class="warn" type="submit">Run now</button></form>
             <form method="post"><input type="hidden" name="action" value="toggle_watcher"><input type="hidden" name="watcher_id" value="{{ watcher.id }}"><input type="hidden" name="enabled" value="{{ 0 if watcher.enabled else 1 }}"><button class="secondary" type="submit">{{ 'Pause' if watcher.enabled else 'Enable' }}</button></form>

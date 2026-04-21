@@ -296,6 +296,14 @@ def token_matches_query_token(query_token: str, candidate_tokens: list[str]) -> 
     return False
 
 
+def has_query_token_hit(query: str, haystack: str) -> bool:
+    query_tokens = [token for token in normalize_search_text(query).split() if len(token) >= 2]
+    haystack_tokens = [token for token in normalize_search_text(haystack).split() if len(token) >= 2]
+    if not query_tokens or not haystack_tokens:
+        return False
+    return any(token_matches_query_token(query_token, haystack_tokens) for query_token in query_tokens)
+
+
 def query_match_score(item: "Item", query: str) -> float:
     normalized_query = normalize_search_text(query)
     if not normalized_query:
@@ -334,11 +342,12 @@ def item_matches_query_text(item: "Item", query: str) -> bool:
 
     query_tokens = [token for token in normalized_query.split() if len(token) >= 2]
     score = query_match_score(item, query)
+    haystack = " ".join(part for part in (item.title, item.brand, item.subtitle) if part).strip()
     if len(query_tokens) <= 1:
-        return score >= 0.72
+        return score >= 0.5 or has_query_token_hit(query, haystack)
     if len(query_tokens) == 2:
-        return score >= 0.58
-    return score >= 0.5
+        return score >= 0.36 or has_query_token_hit(query, haystack)
+    return score >= 0.3 or has_query_token_hit(query, haystack)
 
 
 def build_search_url(
