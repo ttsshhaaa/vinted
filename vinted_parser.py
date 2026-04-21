@@ -474,7 +474,7 @@ def extract_seller_details_from_html(html: str) -> tuple[str, str, str]:
 
 def item_matches_requested_geo(item_geo: str, seller_country: str) -> bool:
     if not seller_country:
-        return True
+        return False
     allowed_countries = GEO_ALLOWED_COUNTRIES.get(item_geo, set())
     if not allowed_countries:
         return True
@@ -484,7 +484,7 @@ def item_matches_requested_geo(item_geo: str, seller_country: str) -> bool:
 def enrich_item_details(session: requests.Session, item: Item, timeout: int) -> Item | None:
     html = fetch_html(session, item.item_url, timeout=timeout)
     seller_country, seller_city, seller_last_online = extract_seller_details_from_html(html)
-    if seller_country and not item_matches_requested_geo(item.geo, seller_country):
+    if not item_matches_requested_geo(item.geo, seller_country):
         return None
 
     listing_age_minutes = extract_item_age_minutes_from_html(html)
@@ -500,7 +500,7 @@ def safe_enrich_item_details(session: requests.Session, item: Item, timeout: int
     try:
         return enrich_item_details(session, item, timeout=timeout)
     except requests.RequestException:
-        return item
+        return None
 
 
 def scrape_geo(
