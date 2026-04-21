@@ -145,6 +145,8 @@ def create_base_tables(connection: sqlite3.Connection) -> None:
             interval_minutes INTEGER NOT NULL DEFAULT 5,
             interval_seconds INTEGER NOT NULL DEFAULT 15,
             fresh_minutes INTEGER NOT NULL DEFAULT 10,
+            run_duration_minutes INTEGER,
+            run_until_at TEXT,
             enabled INTEGER NOT NULL DEFAULT 1,
             last_started_at TEXT,
             last_run_at TEXT,
@@ -255,6 +257,10 @@ def migrate_legacy_watchers(connection: sqlite3.Connection, admin_user_id: int) 
         )
     if "fresh_minutes" not in existing_columns:
         connection.execute("ALTER TABLE watchers ADD COLUMN fresh_minutes INTEGER NOT NULL DEFAULT 10")
+    if "run_duration_minutes" not in existing_columns:
+        connection.execute("ALTER TABLE watchers ADD COLUMN run_duration_minutes INTEGER")
+    if "run_until_at" not in existing_columns:
+        connection.execute("ALTER TABLE watchers ADD COLUMN run_until_at TEXT")
     if "last_started_at" not in existing_columns:
         connection.execute("ALTER TABLE watchers ADD COLUMN last_started_at TEXT")
     if "last_success_at" not in existing_columns:
@@ -379,6 +385,11 @@ def is_user_access_valid(user: sqlite3.Row | None) -> bool:
 
 def is_access_expiry_valid(expires_at: str | None) -> bool:
     parsed = parse_db_datetime(expires_at)
+    return not parsed or parsed > datetime.now(timezone.utc)
+
+
+def is_watcher_timer_active(run_until_at: str | None) -> bool:
+    parsed = parse_db_datetime(run_until_at)
     return not parsed or parsed > datetime.now(timezone.utc)
 
 
@@ -516,7 +527,8 @@ def list_watchers(user_id: int | None = None) -> list[sqlite3.Row]:
             watchers.id, watchers.user_id, users.username, watchers.name, watchers.query,
             watchers.geos, watchers.pages, watchers.price_from, watchers.price_to,
             watchers.order_name, watchers.extra_params, watchers.discord_webhook_url,
-            watchers.interval_minutes, watchers.interval_seconds, watchers.fresh_minutes, watchers.enabled,
+            watchers.interval_minutes, watchers.interval_seconds, watchers.fresh_minutes,
+            watchers.run_duration_minutes, watchers.run_until_at, watchers.enabled,
             watchers.last_started_at, watchers.last_run_at, watchers.last_success_at,
             watchers.last_notification_at, watchers.last_notification_count,
             watchers.last_scan_count, watchers.status_message, watchers.last_error,
@@ -550,13 +562,21 @@ def get_watcher_for_user(watcher_id: int, user_id: int, is_admin: bool) -> sqlit
 
 
 def create_watcher(user_id: int, form: dict[str, str], selected_geos: list[str]) -> int:
+    run_duration_minutes = safe_int(form["watcher_run_duration_minutes"])
+    run_until_at = None
+    if run_duration_minutes and run_duration_minutes > 0:
+        run_until_at = (
+            datetime.now(timezone.utc) + timedelta(minutes=run_duration_minutes)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+
     with get_db_connection() as connection:
         cursor = connection.execute(
             """
             INSERT INTO watchers (
                 user_id, name, query, geos, pages, price_from, price_to,
-                order_name, extra_params, discord_webhook_url, interval_minutes, interval_seconds, fresh_minutes, enabled
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                order_name, extra_params, discord_webhook_url, interval_minutes, interval_seconds,
+                fresh_minutes, run_duration_minutes, run_until_at, enabled
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             """,
             (
                 user_id,
@@ -572,6 +592,8 @@ def create_watcher(user_id: int, form: dict[str, str], selected_geos: list[str])
                 max(((safe_int(form["watcher_interval_seconds"]) or 15) + 59) // 60, 1),
                 max(safe_int(form["watcher_interval_seconds"]) or 15, 5),
                 max(safe_int(form["watcher_fresh_minutes"]) or 10, 1),
+                run_duration_minutes,
+                run_until_at,
             ),
         )
         watcher_id = int(cursor.lastrowid)
@@ -588,6 +610,7 @@ def create_watcher(user_id: int, form: dict[str, str], selected_geos: list[str])
                     "Sort: newest_first",
                     f"Check every: {max(safe_int(form['watcher_interval_seconds']) or 15, 5)} sec",
                     f"Fresh window: {max(safe_int(form['watcher_fresh_minutes']) or 10, 1)} min",
+                    f"Run for: {run_duration_minutes} min" if run_duration_minutes else "Run for: until paused manually",
                     "Baseline saved. Next Discord alerts will include only newly found fresh listings.",
                 ]
             ),
@@ -763,16 +786,34 @@ def decorate_watcher_statuses(watchers: list[sqlite3.Row]) -> list[dict]:
         item = dict(watcher)
         state = "paused"
         if watcher["enabled"]:
-            state = "working"
-            if watcher["last_error"]:
-                state = "warning"
-            last_run = parse_sqlite_timestamp(watcher["last_run_at"])
-            grace_seconds = max(int(watcher["interval_seconds"] or 15) * 3, 30)
-            if last_run and now - last_run > timedelta(seconds=grace_seconds):
-                state = "idle"
+            if not is_watcher_timer_active(watcher["run_until_at"]):
+                state = "finished"
+            else:
+                state = "working"
+                if watcher["last_error"]:
+                    state = "warning"
+                last_run = parse_sqlite_timestamp(watcher["last_run_at"])
+                grace_seconds = max(int(watcher["interval_seconds"] or 15) * 3, 30)
+                if last_run and now - last_run > timedelta(seconds=grace_seconds):
+                    state = "idle"
         item["status_state"] = state
+        item["run_until_label"] = watcher["run_until_at"] or "manual stop"
         decorated.append(item)
     return decorated
+
+
+def finish_expired_watcher(watcher_id: int) -> None:
+    with get_db_connection() as connection:
+        connection.execute(
+            """
+            UPDATE watchers
+            SET enabled = 0,
+                status_message = 'Timer finished automatically.'
+            WHERE id = ?
+            """,
+            (watcher_id,),
+        )
+        connection.commit()
 
 
 def run_single_watcher(watcher_id: int) -> tuple[int, int]:
@@ -793,6 +834,9 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
         or not watcher["user_active"]
         or not is_access_expiry_valid(watcher["user_access_expires_at"])
     ):
+        return 0, 0
+    if not is_watcher_timer_active(watcher["run_until_at"]):
+        finish_expired_watcher(watcher["id"])
         return 0, 0
 
     try:
@@ -915,6 +959,9 @@ def watcher_worker() -> None:
         try:
             watchers = [watcher for watcher in list_watchers() if watcher["enabled"]]
             for watcher in watchers:
+                if not is_watcher_timer_active(watcher["run_until_at"]):
+                    finish_expired_watcher(int(watcher["id"]))
+                    continue
                 if is_watcher_due(watcher):
                     try:
                         run_single_watcher(int(watcher["id"]))
@@ -953,6 +1000,7 @@ def normalize_dashboard_defaults(form_data: dict | None = None) -> dict:
         "watcher_price_to": str(source.get("watcher_price_to", "")).strip(),
         "watcher_interval_seconds": str(source.get("watcher_interval_seconds", "15")).strip() or "15",
         "watcher_fresh_minutes": str(source.get("watcher_fresh_minutes", "10")).strip() or "10",
+        "watcher_run_duration_minutes": str(source.get("watcher_run_duration_minutes", "")).strip(),
         "watcher_selected_geos": (
             source.getlist("watcher_geo")
             if hasattr(source, "getlist")
