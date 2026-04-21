@@ -54,9 +54,12 @@
       <div class="inline" style="margin-top:14px;">
         <button type="submit">Search now</button>
       </div>
+    </form>
       <hr style="border-color:var(--line); margin:18px 0;">
       <h3>Create Discord watcher</h3>
       <div class="small muted" style="margin-bottom:12px;">Watcher uses its own query and filters below. It is independent from the manual search above.</div>
+      <form method="post">
+        <input type="hidden" name="action" value="create_watcher">
       <div style="margin-bottom:12px;">
         <label>Watcher name</label>
         <input name="watcher_name" value="{{ defaults.watcher_name }}">
@@ -109,8 +112,8 @@
         <label>Interval minutes</label>
         <input name="interval_minutes" value="{{ defaults.interval_minutes }}">
       </div>
-      <button type="submit" name="action" value="create_watcher">Save watcher</button>
-    </form>
+        <button type="submit">Save watcher</button>
+      </form>
   </div>
 
   <div class="grid">
