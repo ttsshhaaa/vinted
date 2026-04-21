@@ -24,6 +24,11 @@ DEFAULT_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+API_HEADERS = {
+    **DEFAULT_HEADERS,
+    "Accept": "application/json, text/plain, */*",
+}
+
 GEO_DOMAINS = {
     "us": "https://www.vinted.com",
     "uk": "https://www.vinted.co.uk",
@@ -256,6 +261,74 @@ def build_search_url(
     return f"{base_url}/catalog?{urlencode(params, doseq=True)}"
 
 
+def build_catalog_api_url(base_url: str) -> str:
+    return f"{base_url}/api/v2/catalog/items"
+
+
+def bootstrap_session(session: requests.Session, base_url: str, timeout: int) -> None:
+    session.get(base_url, timeout=timeout, headers=DEFAULT_HEADERS)
+
+
+def format_money(raw_value: dict | None) -> str:
+    if not raw_value:
+        return ""
+    amount = str(raw_value.get("amount", "")).strip()
+    currency = str(raw_value.get("currency_code", "")).strip().upper()
+    if not amount:
+        return currency
+    symbols = {
+        "GBP": "£",
+        "EUR": "€",
+        "USD": "$",
+    }
+    symbol = symbols.get(currency, currency)
+    try:
+        numeric = float(amount)
+        return f"{symbol}{numeric:.2f}" if symbol in {"£", "€", "$"} else f"{numeric:.2f} {symbol}"
+    except ValueError:
+        return f"{symbol}{amount}" if symbol in {"£", "€", "$"} else f"{amount} {symbol}".strip()
+
+
+def parse_api_items(payload: dict, geo: str, search_url: str, base_url: str) -> list[Item]:
+    items: list[Item] = []
+    for raw_item in payload.get("items", []):
+        item_url = str(raw_item.get("url") or "").strip()
+        if not item_url:
+            path = str(raw_item.get("path") or "").strip()
+            item_url = f"{base_url}{path}" if path.startswith("/") else path
+        if not item_url:
+            continue
+
+        photo = raw_item.get("photo") or {}
+        price = format_money(raw_item.get("price"))
+        total_price = format_money(raw_item.get("total_item_price"))
+        currency = str((raw_item.get("price") or {}).get("currency_code", "")).upper()
+        size = clean_text(str(raw_item.get("size_title") or ""))
+        condition = clean_text(str(raw_item.get("status") or ""))
+        brand = clean_text(str(raw_item.get("brand_title") or ""))
+        title = clean_text(str(raw_item.get("title") or brand or ""))
+
+        items.append(
+            Item(
+                geo=geo,
+                item_id=str(raw_item.get("id") or ""),
+                title=title,
+                subtitle=" · ".join(part for part in (size, condition) if part),
+                brand=brand,
+                size=size,
+                condition=condition,
+                price=price,
+                total_price=total_price,
+                currency=currency,
+                image_url=str(photo.get("full_size_url") or photo.get("url") or "").strip(),
+                item_url=item_url,
+                search_url=search_url,
+            )
+        )
+
+    return items
+
+
 def parse_items(html: str, geo: str, search_url: str) -> list[Item]:
     soup = BeautifulSoup(html, "html.parser")
     items: list[Item] = []
@@ -401,7 +474,9 @@ def scrape_geo(
     timeout: int,
 ) -> list[Item]:
     base_url = GEO_DOMAINS[geo]
+    api_url = build_catalog_api_url(base_url)
     all_items: list[Item] = []
+    bootstrap_session(session, base_url, timeout)
 
     for page in range(1, pages + 1):
         search_url = build_search_url(
@@ -413,8 +488,30 @@ def scrape_geo(
             price_to=price_to,
             extra_params=extra_params,
         )
-        html = fetch_html(session, search_url, timeout=timeout)
-        page_items = parse_items(html, geo=geo, search_url=search_url)
+        params = {
+            "search_text": query,
+            "page": str(page),
+            "order": order,
+        }
+        if price_from is not None:
+            params["price_from"] = str(price_from)
+        if price_to is not None:
+            params["price_to"] = str(price_to)
+        params.update(extra_params)
+
+        try:
+            response = session.get(
+                api_url,
+                params=params,
+                timeout=timeout,
+                headers={**API_HEADERS, "Referer": search_url},
+            )
+            response.raise_for_status()
+            page_items = parse_api_items(response.json(), geo=geo, search_url=search_url, base_url=base_url)
+        except requests.RequestException:
+            html = fetch_html(session, search_url, timeout=timeout)
+            page_items = parse_items(html, geo=geo, search_url=search_url)
+
         filtered_items: list[Item] = []
         max_workers = min(6, max(1, len(page_items)))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:

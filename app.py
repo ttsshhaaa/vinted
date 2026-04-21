@@ -798,6 +798,10 @@ def dashboard():
                 extra_params=parse_extra_params(raw_extra),
                 output_dir=OUTPUT_DIR,
             )
+            if result.get("failures"):
+                flash("Some geos failed: " + " | ".join(result["failures"]), "error")
+            elif result["unique_count"] == 0:
+                flash("Search returned zero items. Try a different geo or remove some filters.", "info")
         except Exception as exc:
             logger.exception("Dashboard request failed")
             flash(str(exc), "error")
