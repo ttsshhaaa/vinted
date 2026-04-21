@@ -116,11 +116,6 @@
         <input name="watcher_fresh_minutes" value="{{ defaults.watcher_fresh_minutes }}">
         <div class="small muted" style="margin-top:6px;">Watcher will notify only listings newer than this age window.</div>
       </div>
-      <div style="margin-bottom:12px;">
-        <label>Run for (minutes)</label>
-        <input name="watcher_run_duration_minutes" value="{{ defaults.watcher_run_duration_minutes }}" placeholder="leave empty for manual stop">
-        <div class="small muted" style="margin-top:6px;">Set a timer and the watcher will stop automatically when time runs out.</div>
-      </div>
         <button type="submit">Save watcher</button>
       </form>
   </div>
@@ -146,7 +141,6 @@
         <div class="card">
           <div class="space"><strong>{{ watcher.name }}</strong><span class="pill">{{ watcher.status_state }}</span></div>
           <div class="small muted">{{ watcher.query }} • {{ watcher.geos }} • every {{ watcher.interval_seconds }} sec • newest_first • fresh <= {{ watcher.fresh_minutes }} min</div>
-          <div class="small muted" style="margin-top:6px;">Runs until: {{ watcher.run_until_label }}</div>
           <div class="small muted" style="margin-top:8px;">Last run: {{ watcher.last_run_at or 'never' }} • Last success: {{ watcher.last_success_at or 'never' }}</div>
           <div class="small muted" style="margin-top:6px;">Last sent: {{ watcher.last_notification_count or 0 }} item(s){% if watcher.last_notification_at %} • {{ watcher.last_notification_at }}{% endif %}</div>
           <div class="small muted" style="margin-top:6px;">Last scan: {{ watcher.last_scan_count or 0 }} item(s){% if watcher.status_message %} • {{ watcher.status_message }}{% endif %}{% if watcher.last_error %} • {{ watcher.last_error }}{% endif %}</div>
