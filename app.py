@@ -80,6 +80,15 @@ def safe_int(raw_value: str | None) -> int | None:
     return int(str(raw_value).strip())
 
 
+def safe_float(raw_value: str | None, default: float | None = None) -> float | None:
+    if raw_value is None:
+        return default
+    normalized = str(raw_value).strip().replace(",", ".")
+    if not normalized:
+        return default
+    return float(normalized)
+
+
 def create_base_tables(connection: sqlite3.Connection) -> None:
     connection.execute(
         """
@@ -790,8 +799,8 @@ def dashboard():
             result = run_search(
                 query=defaults["query"],
                 geos=geos,
-                pages=int(defaults["pages"]),
-                delay=float(defaults["delay"]),
+                pages=safe_int(defaults["pages"]) or 1,
+                delay=safe_float(defaults["delay"], 0.5) or 0.5,
                 order=defaults["order"],
                 price_from=safe_int(defaults["price_from"]),
                 price_to=safe_int(defaults["price_to"]),
