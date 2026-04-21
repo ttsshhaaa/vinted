@@ -24,7 +24,14 @@ from flask import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from vinted_parser import GEO_DOMAINS, expand_geos, get_item_age_minutes, parse_extra_params, run_search
+from vinted_parser import (
+    GEO_DOMAINS,
+    enrich_items_for_display,
+    expand_geos,
+    get_item_age_minutes,
+    parse_extra_params,
+    run_search,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -1052,6 +1059,7 @@ def dashboard():
                 extra_params=parse_extra_params(raw_extra),
                 output_dir=OUTPUT_DIR,
             )
+            result["items"] = enrich_items_for_display(result["items"], timeout=30, limit=16)
             if result.get("failures"):
                 flash(
                     "Some geos failed: "

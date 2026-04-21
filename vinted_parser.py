@@ -668,6 +668,38 @@ def safe_enrich_item_details(session: requests.Session, item: Item, timeout: int
         return item
 
 
+def enrich_items_for_display(
+    items: list[Item],
+    timeout: int = 30,
+    limit: int = 12,
+) -> list[Item]:
+    if not items or limit <= 0:
+        return items
+
+    target_indexes = [
+        index
+        for index, item in enumerate(items[:limit])
+        if not item.seller_country or not item.listing_age_label
+    ]
+    if not target_indexes:
+        return items
+
+    session = requests.Session()
+    max_workers = min(4, max(1, len(target_indexes)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        enriched_items = list(
+            executor.map(
+                lambda index: safe_enrich_item_details(session, items[index], timeout),
+                target_indexes,
+            )
+        )
+
+    for index, enriched_item in zip(target_indexes, enriched_items):
+        if enriched_item is not None:
+            items[index] = enriched_item
+    return items
+
+
 def scrape_geo(
     session: requests.Session,
     geo: str,
