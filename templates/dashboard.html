@@ -14,6 +14,7 @@
         <div>
           <label>Pages per geo</label>
           <input name="pages" value="{{ defaults.pages }}">
+          <div class="small muted" style="margin-top:6px;">1 page usually scans only the first ~48 items for that geo.</div>
         </div>
         <div>
           <label>Delay</label>
@@ -77,13 +78,13 @@
         <div class="metric"><div class="label">Watchers</div><div class="value">{{ watchers|length }}</div></div>
         <div class="metric"><div class="label">Favorites</div><div class="value">{{ favorites|length }}</div></div>
         <div class="metric"><div class="label">Geos</div><div class="value">{{ geo_options|length }}</div></div>
-        <div class="metric"><div class="label">Results</div><div class="value">{{ result["unique_count"] if result else 0 }}</div></div>
+        <div class="metric"><div class="label">Shown</div><div class="value">{{ result["unique_count"] if result else 0 }}</div></div>
       </div>
       {% if result %}
       <div class="inline" style="margin-bottom:14px;">
         <a class="btn secondary" href="{{ url_for('download', fmt='json', filename=result['json_path']|basename) }}">Download JSON</a>
         <a class="btn secondary" href="{{ url_for('download', fmt='csv', filename=result['csv_path']|basename) }}">Download CSV</a>
-        <span class="muted small">Raw: {{ result["raw_count"] }} • Unique: {{ result["unique_count"] }}</span>
+        <span class="muted small">Raw: {{ result["raw_count"] }} • Unique shown: {{ result["unique_count"] }} • Pages scanned per geo: {{ defaults.pages }}</span>
       </div>
       {% endif %}
       <h2 style="margin-top:0;">Active watchers</h2>
