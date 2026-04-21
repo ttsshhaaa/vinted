@@ -289,28 +289,49 @@ def token_matches_query_token(query_token: str, candidate_tokens: list[str]) -> 
     return False
 
 
+def query_match_score(item: "Item", query: str) -> float:
+    normalized_query = normalize_search_text(query)
+    if not normalized_query:
+        return 1.0
+
+    title_text = normalize_search_text(item.title)
+    brand_text = normalize_search_text(item.brand)
+    subtitle_text = normalize_search_text(item.subtitle)
+    haystack = " ".join(part for part in (title_text, brand_text, subtitle_text) if part).strip()
+    if not haystack:
+        return 0.0
+    if normalized_query in haystack:
+        return 1.0
+
+    query_tokens = [token for token in normalized_query.split() if len(token) >= 2]
+    haystack_tokens = [token for token in haystack.split() if len(token) >= 2]
+    if not query_tokens or not haystack_tokens:
+        return 0.0
+
+    matched_tokens = sum(
+        1 for query_token in query_tokens if token_matches_query_token(query_token, haystack_tokens)
+    )
+    token_ratio = matched_tokens / len(query_tokens)
+    similarity = SequenceMatcher(None, normalized_query, haystack).ratio()
+    title_similarity = SequenceMatcher(None, normalized_query, title_text).ratio() if title_text else 0.0
+
+    if len(query_tokens) == 1:
+        return max(token_ratio, similarity, title_similarity)
+    return max(token_ratio, similarity * 0.75, title_similarity * 0.9)
+
+
 def item_matches_query_text(item: "Item", query: str) -> bool:
     normalized_query = normalize_search_text(query)
     if not normalized_query:
         return True
 
-    haystack = normalize_search_text(" ".join([item.title, item.brand, item.subtitle]))
-    if not haystack:
-        return False
-    if normalized_query in haystack:
-        return True
-
     query_tokens = [token for token in normalized_query.split() if len(token) >= 2]
-    haystack_tokens = [token for token in haystack.split() if len(token) >= 2]
-    if not query_tokens or not haystack_tokens:
-        return False
-
-    matched_tokens = sum(
-        1 for query_token in query_tokens if token_matches_query_token(query_token, haystack_tokens)
-    )
-    if len(query_tokens) == 1:
-        return matched_tokens == 1
-    return matched_tokens == len(query_tokens)
+    score = query_match_score(item, query)
+    if len(query_tokens) <= 1:
+        return score >= 0.72
+    if len(query_tokens) == 2:
+        return score >= 0.58
+    return score >= 0.5
 
 
 def build_search_url(
@@ -660,6 +681,19 @@ def dedupe_items(items: list[Item]) -> list[Item]:
     return list(unique.values())
 
 
+def sort_items_by_query_relevance(items: list[Item], query: str) -> list[Item]:
+    return sorted(
+        items,
+        key=lambda item: (
+            query_match_score(item, query),
+            1 if normalize_search_text(query) in normalize_search_text(item.title) else 0,
+            item.listing_age_minutes is not None,
+            -(item.listing_age_minutes or 10**9),
+        ),
+        reverse=True,
+    )
+
+
 def write_outputs(items: list[Item], output_dir: Path, query: str) -> tuple[Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -715,7 +749,7 @@ def run_search(
         except requests.RequestException as exc:
             failures.append(f"[{geo}] {exc}")
 
-    unique_items = dedupe_items(all_items)
+    unique_items = sort_items_by_query_relevance(dedupe_items(all_items), query)
     json_path, csv_path = write_outputs(unique_items, output_dir=Path(output_dir), query=query)
     return {
         "items": unique_items,
