@@ -27,6 +27,8 @@ DEFAULT_HEADERS = {
 API_HEADERS = {
     **DEFAULT_HEADERS,
     "Accept": "application/json, text/plain, */*",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
 }
 
 GEO_DOMAINS = {
@@ -266,7 +268,47 @@ def build_catalog_api_url(base_url: str) -> str:
 
 
 def bootstrap_session(session: requests.Session, base_url: str, timeout: int) -> None:
-    session.get(base_url, timeout=timeout, headers=DEFAULT_HEADERS)
+    response = session.get(base_url, timeout=timeout, headers=DEFAULT_HEADERS)
+    response.raise_for_status()
+
+
+def request_catalog_api(
+    session: requests.Session,
+    base_url: str,
+    api_url: str,
+    search_url: str,
+    params: dict[str, str],
+    timeout: int,
+) -> dict:
+    last_error: requests.RequestException | None = None
+    for attempt in range(2):
+        try:
+            if attempt > 0:
+                time.sleep(1.0)
+                bootstrap_session(session, base_url, timeout)
+            response = session.get(
+                api_url,
+                params=params,
+                timeout=timeout,
+                headers={
+                    **API_HEADERS,
+                    "Referer": search_url,
+                    "Origin": base_url,
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.HTTPError as exc:
+            last_error = exc
+            if exc.response is not None and exc.response.status_code != 403:
+                raise
+        except requests.RequestException as exc:
+            last_error = exc
+            if attempt == 1:
+                raise
+    if last_error:
+        raise last_error
+    raise requests.RequestException("Unknown Vinted catalog API failure")
 
 
 def format_money(raw_value: dict | None) -> str:
@@ -500,14 +542,15 @@ def scrape_geo(
         params.update(extra_params)
 
         try:
-            response = session.get(
-                api_url,
+            payload = request_catalog_api(
+                session=session,
+                base_url=base_url,
+                api_url=api_url,
+                search_url=search_url,
                 params=params,
                 timeout=timeout,
-                headers={**API_HEADERS, "Referer": search_url},
             )
-            response.raise_for_status()
-            page_items = parse_api_items(response.json(), geo=geo, search_url=search_url, base_url=base_url)
+            page_items = parse_api_items(payload, geo=geo, search_url=search_url, base_url=base_url)
         except requests.RequestException:
             html = fetch_html(session, search_url, timeout=timeout)
             page_items = parse_items(html, geo=geo, search_url=search_url)

@@ -799,7 +799,12 @@ def dashboard():
                 output_dir=OUTPUT_DIR,
             )
             if result.get("failures"):
-                flash("Some geos failed: " + " | ".join(result["failures"]), "error")
+                flash(
+                    "Some geos failed: "
+                    + " | ".join(result["failures"])
+                    + ". This usually means Vinted blocked the server IP for that geo.",
+                    "error",
+                )
             elif result["unique_count"] == 0:
                 flash("Search returned zero items. Try a different geo or remove some filters.", "info")
         except Exception as exc:
