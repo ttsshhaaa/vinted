@@ -35,7 +35,7 @@ DATA_DIR = (
 )
 OUTPUT_DIR = DATA_DIR / "output"
 DB_PATH = DATA_DIR / "app.db"
-WATCHER_POLL_SECONDS = 60
+WATCHER_POLL_SECONDS = 5
 DEFAULT_ADMIN_USERNAME = "kon1337"
 DEFAULT_ADMIN_PASSWORD = "thklty13"
 
@@ -119,6 +119,7 @@ def create_base_tables(connection: sqlite3.Connection) -> None:
             extra_params TEXT DEFAULT '',
             discord_webhook_url TEXT NOT NULL DEFAULT '',
             interval_minutes INTEGER NOT NULL DEFAULT 5,
+            interval_seconds INTEGER NOT NULL DEFAULT 15,
             fresh_minutes INTEGER NOT NULL DEFAULT 10,
             enabled INTEGER NOT NULL DEFAULT 1,
             last_started_at TEXT,
@@ -217,6 +218,17 @@ def migrate_legacy_watchers(connection: sqlite3.Connection, admin_user_id: int) 
 
     if "enabled" not in existing_columns:
         connection.execute("ALTER TABLE watchers ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+    if "interval_seconds" not in existing_columns:
+        connection.execute("ALTER TABLE watchers ADD COLUMN interval_seconds INTEGER NOT NULL DEFAULT 15")
+        connection.execute(
+            """
+            UPDATE watchers
+            SET interval_seconds = CASE
+                WHEN interval_minutes IS NOT NULL AND interval_minutes > 0 THEN interval_minutes * 60
+                ELSE 15
+            END
+            """
+        )
     if "fresh_minutes" not in existing_columns:
         connection.execute("ALTER TABLE watchers ADD COLUMN fresh_minutes INTEGER NOT NULL DEFAULT 10")
     if "last_started_at" not in existing_columns:
@@ -480,7 +492,7 @@ def list_watchers(user_id: int | None = None) -> list[sqlite3.Row]:
             watchers.id, watchers.user_id, users.username, watchers.name, watchers.query,
             watchers.geos, watchers.pages, watchers.price_from, watchers.price_to,
             watchers.order_name, watchers.extra_params, watchers.discord_webhook_url,
-            watchers.interval_minutes, watchers.fresh_minutes, watchers.enabled,
+            watchers.interval_minutes, watchers.interval_seconds, watchers.fresh_minutes, watchers.enabled,
             watchers.last_started_at, watchers.last_run_at, watchers.last_success_at,
             watchers.last_notification_at, watchers.last_notification_count,
             watchers.last_scan_count, watchers.status_message, watchers.last_error,
@@ -519,8 +531,8 @@ def create_watcher(user_id: int, form: dict[str, str], selected_geos: list[str])
             """
             INSERT INTO watchers (
                 user_id, name, query, geos, pages, price_from, price_to,
-                order_name, extra_params, discord_webhook_url, interval_minutes, fresh_minutes, enabled
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                order_name, extra_params, discord_webhook_url, interval_minutes, interval_seconds, fresh_minutes, enabled
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             """,
             (
                 user_id,
@@ -530,10 +542,11 @@ def create_watcher(user_id: int, form: dict[str, str], selected_geos: list[str])
                 safe_int(form["watcher_pages"]) or 1,
                 safe_int(form["watcher_price_from"]),
                 safe_int(form["watcher_price_to"]),
-                form["watcher_order"],
+                "newest_first",
                 form["watcher_extra_params"],
                 form["discord_webhook_url"],
-                int(form["interval_minutes"]),
+                max(((safe_int(form["watcher_interval_seconds"]) or 15) + 59) // 60, 1),
+                max(safe_int(form["watcher_interval_seconds"]) or 15, 5),
                 max(safe_int(form["watcher_fresh_minutes"]) or 10, 1),
             ),
         )
@@ -548,6 +561,8 @@ def create_watcher(user_id: int, form: dict[str, str], selected_geos: list[str])
                     f"Watcher started: {form['watcher_name']}",
                     f"Query: {form['watcher_query']}",
                     f"Geos: {', '.join(selected_geos).upper()}",
+                    "Sort: newest_first",
+                    f"Check every: {max(safe_int(form['watcher_interval_seconds']) or 15, 5)} sec",
                     f"Fresh window: {max(safe_int(form['watcher_fresh_minutes']) or 10, 1)} min",
                     "Baseline saved. Next Discord alerts will include only newly found fresh listings.",
                 ]
@@ -570,7 +585,7 @@ def prime_watcher_seen_items(watcher_id: int) -> int:
         geos=expand_geos(watcher["geos"]),
         pages=watcher["pages"],
         delay=0,
-        order=watcher["order_name"],
+        order="newest_first",
         price_from=watcher["price_from"],
         price_to=watcher["price_to"],
         extra_params=parse_extra_params(
@@ -636,7 +651,7 @@ def is_watcher_due(watcher: sqlite3.Row) -> bool:
         row = connection.execute(
             """
             SELECT CASE
-                WHEN datetime(last_run_at, '+' || interval_minutes || ' minutes') <= datetime('now')
+                WHEN datetime(last_run_at, '+' || interval_seconds || ' seconds') <= datetime('now')
                 THEN 1 ELSE 0 END AS due
             FROM watchers
             WHERE id = ?
@@ -728,8 +743,8 @@ def decorate_watcher_statuses(watchers: list[sqlite3.Row]) -> list[dict]:
             if watcher["last_error"]:
                 state = "warning"
             last_run = parse_sqlite_timestamp(watcher["last_run_at"])
-            grace_minutes = max(int(watcher["interval_minutes"] or 5) * 2, 5)
-            if last_run and now - last_run > timedelta(minutes=grace_minutes):
+            grace_seconds = max(int(watcher["interval_seconds"] or 15) * 3, 30)
+            if last_run and now - last_run > timedelta(seconds=grace_seconds):
                 state = "idle"
         item["status_state"] = state
         decorated.append(item)
@@ -763,7 +778,7 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
             geos=expand_geos(watcher["geos"]),
             pages=watcher["pages"],
             delay=0,
-            order=watcher["order_name"],
+            order="newest_first",
             price_from=watcher["price_from"],
             price_to=watcher["price_to"],
             extra_params=parse_extra_params(
@@ -815,9 +830,7 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
             if fresh_items:
                 lines = [f"{watcher['name']}: {len(fresh_items)} new item(s)"]
                 for item in fresh_items[:10]:
-                    lines.append(
-                        f"{item['geo']} | {item['price']} | {item['title']} | {item['age_minutes']} min ago"
-                    )
+                    lines.append(item["title"])
                     lines.append(item["item_url"])
                 if len(fresh_items) > 10:
                     lines.append(f"...and {len(fresh_items) - 10} more")
@@ -907,12 +920,11 @@ def normalize_dashboard_defaults(form_data: dict | None = None) -> dict:
         "extra_params": str(source.get("extra_params", "")).strip(),
         "watcher_name": str(source.get("watcher_name", "")).strip(),
         "discord_webhook_url": str(source.get("discord_webhook_url", "")).strip(),
-        "interval_minutes": str(source.get("interval_minutes", "5")).strip() or "5",
         "watcher_query": str(source.get("watcher_query", "")).strip(),
         "watcher_pages": str(source.get("watcher_pages", "1")).strip() or "1",
         "watcher_price_from": str(source.get("watcher_price_from", "")).strip(),
         "watcher_price_to": str(source.get("watcher_price_to", "")).strip(),
-        "watcher_order": str(source.get("watcher_order", "newest_first")).strip() or "newest_first",
+        "watcher_interval_seconds": str(source.get("watcher_interval_seconds", "15")).strip() or "15",
         "watcher_fresh_minutes": str(source.get("watcher_fresh_minutes", "10")).strip() or "10",
         "watcher_selected_geos": (
             source.getlist("watcher_geo")

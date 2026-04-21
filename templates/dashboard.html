@@ -74,12 +74,9 @@
           <input name="watcher_pages" value="{{ defaults.watcher_pages }}">
         </div>
         <div>
-          <label>Watcher sort order</label>
-          <select name="watcher_order">
-            {% for value in ['newest_first', 'relevance', 'price_low_to_high', 'price_high_to_low'] %}
-            <option value="{{ value }}" {% if defaults.watcher_order == value %}selected{% endif %}>{{ value }}</option>
-            {% endfor %}
-          </select>
+          <label>Sort order</label>
+          <input value="newest_first" disabled>
+          <div class="small muted" style="margin-top:6px;">Watcher always uses Vinted newest_first for fastest detection.</div>
         </div>
       </div>
       <div class="row2" style="margin-top:12px;">
@@ -109,8 +106,9 @@
         <input name="discord_webhook_url" value="{{ defaults.discord_webhook_url }}">
       </div>
       <div style="margin-bottom:12px;">
-        <label>Interval minutes</label>
-        <input name="interval_minutes" value="{{ defaults.interval_minutes }}">
+        <label>Check every (seconds)</label>
+        <input name="watcher_interval_seconds" value="{{ defaults.watcher_interval_seconds }}">
+        <div class="small muted" style="margin-top:6px;">Use a low value for near real-time alerts. Recommended: 10-20 sec.</div>
       </div>
       <div style="margin-bottom:12px;">
         <label>Fresh only (minutes)</label>
@@ -141,7 +139,7 @@
         {% for watcher in watchers %}
         <div class="card">
           <div class="space"><strong>{{ watcher.name }}</strong><span class="pill">{{ watcher.status_state }}</span></div>
-          <div class="small muted">{{ watcher.query }} • {{ watcher.geos }} • every {{ watcher.interval_minutes }} min • fresh <= {{ watcher.fresh_minutes }} min</div>
+          <div class="small muted">{{ watcher.query }} • {{ watcher.geos }} • every {{ watcher.interval_seconds }} sec • newest_first • fresh <= {{ watcher.fresh_minutes }} min</div>
           <div class="small muted" style="margin-top:8px;">Last run: {{ watcher.last_run_at or 'never' }} • Last success: {{ watcher.last_success_at or 'never' }}</div>
           <div class="small muted" style="margin-top:6px;">Last sent: {{ watcher.last_notification_count or 0 }} item(s){% if watcher.last_notification_at %} • {{ watcher.last_notification_at }}{% endif %}</div>
           <div class="small muted" style="margin-top:6px;">Last scan: {{ watcher.last_scan_count or 0 }} item(s){% if watcher.status_message %} • {{ watcher.status_message }}{% endif %}{% if watcher.last_error %} • {{ watcher.last_error }}{% endif %}</div>
