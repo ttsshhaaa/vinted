@@ -782,10 +782,6 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
                 ).fetchone()
                 if exists:
                     continue
-                connection.execute(
-                    "INSERT INTO watcher_seen_items (watcher_id, item_url) VALUES (?, ?)",
-                    (watcher["id"], item.item_url),
-                )
                 new_items.append(
                     {
                         "title": item.title,
@@ -795,13 +791,13 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
                         "age_minutes": item.listing_age_minutes,
                     }
                 )
-            connection.commit()
 
         if new_items and watcher["discord_webhook_url"]:
             session_http = requests.Session()
             fresh_items: list[dict] = []
             stale_items = 0
             unknown_age_items = 0
+            seen_urls: list[str] = []
             for item in new_items:
                 age_minutes = item.get("age_minutes")
                 if age_minutes is None:
@@ -814,6 +810,7 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
                     fresh_items.append(item)
                 else:
                     stale_items += 1
+                    seen_urls.append(item["item_url"])
 
             if fresh_items:
                 lines = [f"{watcher['name']}: {len(fresh_items)} new item(s)"]
@@ -825,6 +822,16 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
                 if len(fresh_items) > 10:
                     lines.append(f"...and {len(fresh_items) - 10} more")
                 send_discord_message(watcher["discord_webhook_url"], "\n".join(lines))
+                seen_urls.extend(item["item_url"] for item in fresh_items)
+
+            if seen_urls:
+                with get_db_connection() as connection:
+                    for item_url in seen_urls:
+                        connection.execute(
+                            "INSERT OR IGNORE INTO watcher_seen_items (watcher_id, item_url) VALUES (?, ?)",
+                            (watcher["id"], item_url),
+                        )
+                    connection.commit()
 
             notes: list[str] = []
             if fresh_items:
@@ -834,7 +841,7 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
             if stale_items:
                 notes.append(f"old skipped: {stale_items}")
             if unknown_age_items:
-                notes.append(f"age unknown skipped: {unknown_age_items}")
+                notes.append(f"age unknown will retry: {unknown_age_items}")
             record_watcher_run(
                 watcher["id"],
                 scan_count=result["unique_count"],
@@ -842,6 +849,15 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
                 status_message=" ".join(notes),
             )
             return len(fresh_items), result["unique_count"]
+
+        if new_items:
+            with get_db_connection() as connection:
+                for item in new_items:
+                    connection.execute(
+                        "INSERT OR IGNORE INTO watcher_seen_items (watcher_id, item_url) VALUES (?, ?)",
+                        (watcher["id"], item["item_url"]),
+                    )
+                connection.commit()
 
         record_watcher_run(
             watcher["id"],
