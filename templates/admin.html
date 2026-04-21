@@ -4,26 +4,67 @@
 <div class="grid">
   <div class="panel">
     <h1 style="margin-top:0;">Admin panel</h1>
-    <p class="muted">Управление аккаунтами, ролями и всеми watcher-ами проекта.</p>
+    <p class="muted">Управление аккаунтами, сроками доступа, ролями и всеми watcher-ами проекта.</p>
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0;">Create user</h2>
+    <form method="post">
+      <input type="hidden" name="action" value="create_user">
+      <div class="row2">
+        <div>
+          <label>Username</label>
+          <input name="username" required>
+        </div>
+        <div>
+          <label>Password</label>
+          <input type="password" name="password" required>
+        </div>
+      </div>
+      <div class="row2" style="margin-top:12px;">
+        <div>
+          <label>Role</label>
+          <select name="role">
+            <option value="user">user</option>
+            <option value="admin">admin</option>
+          </select>
+        </div>
+        <div>
+          <label>Access duration</label>
+          <select name="access_duration">
+            <option value="1w">1 week</option>
+            <option value="1m" selected>1 month</option>
+            <option value="forever">forever</option>
+          </select>
+        </div>
+      </div>
+      <div class="inline" style="margin-top:12px;">
+        <button type="submit">Create user</button>
+      </div>
+    </form>
   </div>
   <div class="panel">
     <h2 style="margin-top:0;">Users</h2>
     <table class="table">
       <thead>
-        <tr><th>User</th><th>Role</th><th>Status</th><th>Watchers</th><th>Favorites</th><th>Actions</th></tr>
+        <tr><th>User</th><th>Role</th><th>Status</th><th>Access</th><th>Watchers</th><th>Favorites</th><th>Actions</th></tr>
       </thead>
       <tbody>
         {% for user in users %}
         <tr>
           <td><strong>{{ user.username }}</strong><div class="small muted">created {{ user.created_at }}</div></td>
           <td>{{ user.role }}</td>
-          <td>{{ 'active' if user.active else 'disabled' }}</td>
+          <td>{{ 'active' if user.active else 'disabled' }}{% if user.access_status == 'expired' %} / expired{% endif %}</td>
+          <td>{{ user.access_label }}</td>
           <td>{{ user.watcher_count }}</td>
           <td>{{ user.favorite_count }}</td>
           <td>
             <div class="inline">
               <form method="post"><input type="hidden" name="action" value="toggle_user_active"><input type="hidden" name="user_id" value="{{ user.id }}"><button class="secondary" type="submit">{{ 'Disable' if user.active else 'Enable' }}</button></form>
               <form method="post"><input type="hidden" name="action" value="toggle_user_role"><input type="hidden" name="user_id" value="{{ user.id }}"><button class="warn" type="submit">Make {{ 'user' if user.role == 'admin' else 'admin' }}</button></form>
+              <form method="post"><input type="hidden" name="action" value="set_user_access"><input type="hidden" name="user_id" value="{{ user.id }}"><input type="hidden" name="access_duration" value="1w"><button class="secondary" type="submit">+1 week</button></form>
+              <form method="post"><input type="hidden" name="action" value="set_user_access"><input type="hidden" name="user_id" value="{{ user.id }}"><input type="hidden" name="access_duration" value="1m"><button class="secondary" type="submit">+1 month</button></form>
+              <form method="post"><input type="hidden" name="action" value="set_user_access"><input type="hidden" name="user_id" value="{{ user.id }}"><input type="hidden" name="access_duration" value="forever"><button class="warn" type="submit">Forever</button></form>
+              <form method="post"><input type="hidden" name="action" value="delete_user"><input type="hidden" name="user_id" value="{{ user.id }}"><button class="danger" type="submit">Delete</button></form>
             </div>
           </td>
         </tr>

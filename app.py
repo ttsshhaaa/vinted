@@ -4,7 +4,7 @@ import os
 import sqlite3
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 from urllib.parse import quote
@@ -99,6 +99,7 @@ def create_base_tables(connection: sqlite3.Connection) -> None:
             password_hash TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'user',
             active INTEGER NOT NULL DEFAULT 1,
+            access_expires_at TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
@@ -194,6 +195,12 @@ def ensure_admin_user(connection: sqlite3.Connection) -> int:
     return int(cursor.lastrowid)
 
 
+def migrate_legacy_users(connection: sqlite3.Connection) -> None:
+    existing_columns = column_names(connection, "users")
+    if "access_expires_at" not in existing_columns:
+        connection.execute("ALTER TABLE users ADD COLUMN access_expires_at TEXT")
+
+
 def migrate_legacy_watchers(connection: sqlite3.Connection, admin_user_id: int) -> None:
     existing_columns = column_names(connection, "watchers")
     if not existing_columns:
@@ -267,6 +274,7 @@ def init_db() -> None:
     ensure_storage()
     with get_db_connection() as connection:
         create_base_tables(connection)
+        migrate_legacy_users(connection)
         admin_user_id = ensure_admin_user(connection)
         migrate_legacy_watchers(connection, admin_user_id)
         migrate_legacy_favorites(connection, admin_user_id)
@@ -279,7 +287,7 @@ def get_user_by_id(user_id: int | None) -> sqlite3.Row | None:
         return None
     with get_db_connection() as connection:
         return connection.execute(
-            "SELECT id, username, role, active, created_at FROM users WHERE id = ?",
+            "SELECT id, username, role, active, access_expires_at, created_at FROM users WHERE id = ?",
             (user_id,),
         ).fetchone()
 
@@ -293,21 +301,72 @@ def get_user_by_username(username: str) -> sqlite3.Row | None:
 
 
 def create_user(username: str, password: str, role: str = "user") -> int:
+    return create_user_with_access(username=username, password=password, role=role, access_expires_at=None)
+
+
+def create_user_with_access(
+    username: str,
+    password: str,
+    role: str = "user",
+    access_expires_at: str | None = None,
+) -> int:
     with get_db_connection() as connection:
         cursor = connection.execute(
             """
-            INSERT INTO users (username, password_hash, role, active)
-            VALUES (?, ?, ?, 1)
+            INSERT INTO users (username, password_hash, role, active, access_expires_at)
+            VALUES (?, ?, ?, 1, ?)
             """,
-            (username, generate_password_hash(password), role),
+            (username, generate_password_hash(password), role, access_expires_at),
         )
         connection.commit()
         return int(cursor.lastrowid)
 
 
+def parse_db_datetime(raw_value: str | None) -> datetime | None:
+    if not raw_value:
+        return None
+    for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            parsed = datetime.strptime(raw_value, pattern)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def is_user_access_valid(user: sqlite3.Row | None) -> bool:
+    if not user or not user["active"]:
+        return False
+    expires_at = parse_db_datetime(user["access_expires_at"])
+    return not expires_at or expires_at > datetime.now(timezone.utc)
+
+
+def is_access_expiry_valid(expires_at: str | None) -> bool:
+    parsed = parse_db_datetime(expires_at)
+    return not parsed or parsed > datetime.now(timezone.utc)
+
+
+def describe_access_window(expires_at: str | None) -> str:
+    parsed = parse_db_datetime(expires_at)
+    if not parsed:
+        return "permanent"
+    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def compute_access_expiry(duration: str) -> str | None:
+    now = datetime.now(timezone.utc)
+    if duration == "1w":
+        return (now + timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+    if duration == "1m":
+        return (now + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+    if duration == "forever":
+        return None
+    raise ValueError("Unsupported access duration.")
+
+
 def authenticate_user(username: str, password: str) -> sqlite3.Row | None:
     user = get_user_by_username(username)
-    if not user or not user["active"]:
+    if not is_user_access_valid(user):
         return None
     if not check_password_hash(user["password_hash"], password):
         return None
@@ -317,6 +376,9 @@ def authenticate_user(username: str, password: str) -> sqlite3.Row | None:
 @app.before_request
 def load_current_user() -> None:
     g.current_user = get_user_by_id(session.get("user_id"))
+    if g.current_user and not is_user_access_valid(g.current_user):
+        session.clear()
+        g.current_user = None
 
 
 @app.context_processor
@@ -678,7 +740,7 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
     with get_db_connection() as connection:
         watcher = connection.execute(
             """
-            SELECT watchers.*, users.active AS user_active
+            SELECT watchers.*, users.active AS user_active, users.access_expires_at AS user_access_expires_at
             FROM watchers
             JOIN users ON users.id = watchers.user_id
             WHERE watchers.id = ?
@@ -686,7 +748,12 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
             (watcher_id,),
         ).fetchone()
 
-    if not watcher or not watcher["enabled"] or not watcher["user_active"]:
+    if (
+        not watcher
+        or not watcher["enabled"]
+        or not watcher["user_active"]
+        or not is_access_expiry_valid(watcher["user_access_expires_at"])
+    ):
         return 0, 0
 
     try:
@@ -846,37 +913,20 @@ def login():
         return redirect(url_for("dashboard"))
 
     if request.method == "POST":
-        action = request.form.get("action", "login").strip()
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "").strip()
 
         try:
-            if action == "register":
-                if len(username) < 3:
-                    raise ValueError("Username must be at least 3 characters.")
-                if len(password) < 6:
-                    raise ValueError("Password must be at least 6 characters.")
-                if get_user_by_username(username):
-                    raise ValueError("This username is already taken.")
-                user_id = create_user(username, password)
-                session.clear()
-                session["user_id"] = user_id
-                return redirect(url_for("dashboard"))
-
             user = authenticate_user(username, password)
             if not user:
-                raise ValueError("Wrong username or password.")
+                raise ValueError("Wrong username or password, or access has expired.")
             session.clear()
             session["user_id"] = int(user["id"])
             return redirect(url_for("dashboard"))
         except Exception as exc:
             flash(str(exc), "error")
 
-    return render_template(
-        "login.html",
-        admin_username=DEFAULT_ADMIN_USERNAME,
-        admin_password=DEFAULT_ADMIN_PASSWORD,
-    )
+    return render_template("login.html")
 
 
 @app.post("/logout")
@@ -988,7 +1038,27 @@ def admin_panel():
         action = request.form.get("action", "").strip()
         user_id = int(request.form.get("user_id", "0"))
         try:
-            if action == "toggle_user_active":
+            if action == "create_user":
+                username = request.form.get("username", "").strip()
+                password = request.form.get("password", "").strip()
+                duration = request.form.get("access_duration", "1m").strip()
+                role = request.form.get("role", "user").strip()
+                if len(username) < 3:
+                    raise ValueError("Username must be at least 3 characters.")
+                if len(password) < 6:
+                    raise ValueError("Password must be at least 6 characters.")
+                if get_user_by_username(username):
+                    raise ValueError("This username is already taken.")
+                if role not in {"user", "admin"}:
+                    raise ValueError("Unsupported role.")
+                create_user_with_access(
+                    username=username,
+                    password=password,
+                    role=role,
+                    access_expires_at=compute_access_expiry(duration),
+                )
+                flash("User created.", "info")
+            elif action == "toggle_user_active":
                 if user_id == int(g.current_user["id"]):
                     raise ValueError("You cannot disable the current admin session.")
                 with get_db_connection() as connection:
@@ -1012,6 +1082,36 @@ def admin_panel():
                     connection.execute("UPDATE users SET role = ? WHERE id = ?", (next_role, user_id))
                     connection.commit()
                 flash("User role updated.", "info")
+            elif action == "set_user_access":
+                if user_id == int(g.current_user["id"]):
+                    raise ValueError("Do not change the current admin access from this panel.")
+                duration = request.form.get("access_duration", "").strip()
+                with get_db_connection() as connection:
+                    user = connection.execute(
+                        "SELECT id FROM users WHERE id = ?",
+                        (user_id,),
+                    ).fetchone()
+                    if not user:
+                        raise ValueError("User not found.")
+                    connection.execute(
+                        "UPDATE users SET active = 1, access_expires_at = ? WHERE id = ?",
+                        (compute_access_expiry(duration), user_id),
+                    )
+                    connection.commit()
+                flash("User access updated.", "info")
+            elif action == "delete_user":
+                if user_id == int(g.current_user["id"]):
+                    raise ValueError("You cannot delete the current admin session.")
+                with get_db_connection() as connection:
+                    user = connection.execute(
+                        "SELECT role FROM users WHERE id = ?",
+                        (user_id,),
+                    ).fetchone()
+                    if not user:
+                        raise ValueError("User not found.")
+                    connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
+                    connection.commit()
+                flash("User deleted.", "info")
         except Exception as exc:
             flash(str(exc), "error")
         return redirect(url_for("admin_panel"))
@@ -1031,8 +1131,15 @@ def admin_panel():
             """
         ).fetchall()
 
+    decorated_users = []
+    for user in users:
+        item = dict(user)
+        item["access_status"] = "active" if is_user_access_valid(user) else "expired"
+        item["access_label"] = describe_access_window(user["access_expires_at"])
+        decorated_users.append(item)
+
     watchers = list_watchers()
-    return render_template("admin.html", users=users, watchers=watchers)
+    return render_template("admin.html", users=decorated_users, watchers=watchers)
 
 
 @app.get("/healthz")
