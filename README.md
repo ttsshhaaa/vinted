@@ -22,8 +22,8 @@ Change it after first login in production.
 ## Railway setup
 
 1. Add a Railway Volume to the service.
-2. Mount it, for example, to `/app/data`.
-3. Add env var `DATA_DIR=/app/data`.
+2. Mount it to `/data` or `/app/data`.
+3. Add env var `DATA_DIR` to the same mount path.
 4. Add env var `FLASK_SECRET_KEY` with a long random value.
 5. Optional but recommended for hosted deployments:
    - `SEARCH_MODE=lite`
@@ -33,8 +33,10 @@ Change it after first login in production.
 7. Redeploy.
 
 The app will then store:
-- SQLite DB at `/app/data/app.db`
-- exports at `/app/data/output`
+- SQLite DB at `<DATA_DIR>/app.db`
+- exports at `<DATA_DIR>/output`
+
+If `DATA_DIR` is not set but Railway volume is mounted at `/data` or `/app/data`, the app now auto-detects that path and keeps watchers/favorites/database across redeploys.
 
 ## Features
 

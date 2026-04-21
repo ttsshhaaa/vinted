@@ -28,14 +28,31 @@ from vinted_parser import GEO_DOMAINS, expand_geos, get_item_age_minutes, parse_
 
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = (
-    Path(os.environ["DATA_DIR"]).resolve()
-    if os.environ.get("DATA_DIR")
-    else (BASE_DIR / "data")
-)
+
+
+def resolve_data_dir() -> Path:
+    if os.environ.get("DATA_DIR"):
+        return Path(os.environ["DATA_DIR"]).resolve()
+
+    railway_markers = (
+        os.environ.get("RAILWAY_ENVIRONMENT"),
+        os.environ.get("RAILWAY_ENVIRONMENT_NAME"),
+        os.environ.get("RAILWAY_PROJECT_ID"),
+        os.environ.get("RAILWAY_SERVICE_ID"),
+    )
+    if any(railway_markers):
+        for candidate in (Path("/data"), Path("/app/data")):
+            if candidate.exists():
+                return candidate.resolve()
+
+    return (BASE_DIR / "data").resolve()
+
+
+DATA_DIR = resolve_data_dir()
 OUTPUT_DIR = DATA_DIR / "output"
 DB_PATH = DATA_DIR / "app.db"
 WATCHER_POLL_SECONDS = 5
+WATCHER_STARTUP_GRACE_SECONDS = 8
 DEFAULT_ADMIN_USERNAME = "kon1337"
 DEFAULT_ADMIN_PASSWORD = "thklty13"
 
@@ -885,6 +902,8 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
 
 
 def watcher_worker() -> None:
+    logger.info("Watcher worker boot grace period: %s seconds", WATCHER_STARTUP_GRACE_SECONDS)
+    time.sleep(WATCHER_STARTUP_GRACE_SECONDS)
     while True:
         try:
             watchers = [watcher for watcher in list_watchers() if watcher["enabled"]]
@@ -904,6 +923,7 @@ def start_watcher_thread() -> None:
     if _watcher_thread_started:
         return
     _watcher_thread_started = True
+    logger.info("Starting watcher worker with DATA_DIR=%s and DB_PATH=%s", DATA_DIR, DB_PATH)
     threading.Thread(target=watcher_worker, daemon=True, name="watcher-worker").start()
 
 
