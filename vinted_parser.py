@@ -3,6 +3,7 @@ import csv
 import json
 import re
 import time
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -41,6 +42,15 @@ GEO_DOMAINS = {
     "ro": "https://www.vinted.ro",
     "hr": "https://www.vinted.hr",
     "lt": "https://www.vinted.lt",
+    "ee": "https://www.vinted.ee",
+    "lu": "https://www.vinted.lu",
+    "lv": "https://www.vinted.lv",
+    "se": "https://www.vinted.se",
+    "si": "https://www.vinted.si",
+    "dk": "https://www.vinted.dk",
+    "fi": "https://www.vinted.fi",
+    "gr": "https://www.vinted.gr",
+    "ie": "https://www.vinted.ie",
 }
 
 GEO_ALLOWED_COUNTRIES = {
@@ -61,6 +71,25 @@ GEO_ALLOWED_COUNTRIES = {
     "ro": {"românia", "romania"},
     "hr": {"hrvatska", "croatia"},
     "lt": {"lietuva", "lithuania"},
+    "ee": {"eesti", "estonia"},
+    "lu": {"luxembourg", "luxemburg"},
+    "lv": {"latvija", "latvia"},
+    "se": {"sverige", "sweden"},
+    "si": {"slovenija", "slovenia"},
+    "dk": {"danmark", "denmark"},
+    "fi": {"suomi", "finland"},
+    "gr": {"ellada", "greece"},
+    "ie": {"ireland", "eir"},
+}
+
+GEO_ALLOWED_COUNTRIES = {
+    geo: {
+        "".join(char for char in unicodedata.normalize("NFKD", alias) if not unicodedata.combining(char))
+        .replace("\\/", "/")
+        .casefold()
+        for alias in aliases
+    }
+    for geo, aliases in GEO_ALLOWED_COUNTRIES.items()
 }
 
 
@@ -164,7 +193,10 @@ def clean_text(value: str) -> str:
 
 
 def normalize_country_name(value: str) -> str:
-    return clean_text(value).replace("\\/", "/").casefold()
+    normalized = clean_text(value).replace("\\/", "/")
+    normalized = unicodedata.normalize("NFKD", normalized)
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    return normalized.casefold()
 
 
 def format_age_label(minutes: int | None) -> str:

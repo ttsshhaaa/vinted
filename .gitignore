@@ -1,4 +1,9 @@
-__pycache__/
+﻿__pycache__/
 *.pyc
-app.db
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-journal
 output/
+data/

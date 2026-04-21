@@ -1,0 +1,111 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Vinted Control{% endblock %}</title>
+  <style>
+    :root {
+      --bg: #0b1115;
+      --panel: #121b21;
+      --panel-2: #17242c;
+      --text: #eef5f7;
+      --muted: #95a8b1;
+      --line: #23343d;
+      --accent: #1db894;
+      --danger: #e26666;
+      --warn: #e9b75f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Segoe UI, Arial, sans-serif;
+      background: radial-gradient(circle at top left, rgba(29,184,148,.15), transparent 28%), linear-gradient(160deg, #071015, #0d1419 45%, #111b21);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    a { color: #9be9d6; text-decoration: none; }
+    .shell { width: min(1380px, calc(100% - 32px)); margin: 0 auto; padding: 24px 0 40px; }
+    .topbar {
+      display: flex; justify-content: space-between; align-items: center; gap: 16px;
+      padding: 16px 20px; margin-bottom: 20px; background: rgba(18,27,33,.88);
+      border: 1px solid var(--line); border-radius: 20px; backdrop-filter: blur(10px);
+    }
+    .brand { font-size: 22px; font-weight: 800; }
+    .muted { color: var(--muted); }
+    .btn, button {
+      border: 0; border-radius: 14px; padding: 12px 16px; cursor: pointer;
+      color: white; background: linear-gradient(135deg, var(--accent), #16876d); font-weight: 700;
+    }
+    .btn.secondary, .secondary button, button.secondary {
+      background: #22323b; border: 1px solid var(--line);
+    }
+    .btn.danger, button.danger { background: linear-gradient(135deg, #c65454, #8f3434); }
+    .btn.warn, button.warn { background: linear-gradient(135deg, #d7a448, #9b6c1d); }
+    input, select, textarea {
+      width: 100%; padding: 12px 14px; color: var(--text); background: #0f171c;
+      border: 1px solid var(--line); border-radius: 14px; outline: none;
+    }
+    textarea { min-height: 90px; resize: vertical; }
+    label { display: block; margin-bottom: 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; font-weight: 700; letter-spacing: .08em; }
+    .grid { display: grid; gap: 18px; }
+    .panel {
+      background: rgba(18,27,33,.92); border: 1px solid var(--line); border-radius: 22px; padding: 20px;
+      box-shadow: 0 18px 40px rgba(0,0,0,.25);
+    }
+    .flash { padding: 14px 16px; border-radius: 14px; margin-bottom: 14px; border: 1px solid var(--line); }
+    .flash.error { background: rgba(175,58,58,.16); border-color: rgba(226,102,102,.35); }
+    .flash.info { background: rgba(29,184,148,.12); border-color: rgba(29,184,148,.35); }
+    .cards { display: grid; gap: 14px; }
+    .card { background: #10191f; border: 1px solid var(--line); border-radius: 18px; padding: 16px; }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; }
+    .metric { background: #10191f; border: 1px solid var(--line); border-radius: 18px; padding: 16px; }
+    .metric .value { font-size: 28px; font-weight: 800; }
+    .metric .label { color: var(--muted); font-size: 12px; text-transform: uppercase; margin-bottom: 8px; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .layout { display: grid; grid-template-columns: 380px 1fr; gap: 18px; align-items: start; }
+    .geo-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; max-height: 280px; overflow: auto; }
+    .geo-pill { display: flex; gap: 8px; align-items: center; background: #0f171c; border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; }
+    .geo-pill input { width: auto; }
+    .item-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+    .item-card img { width: 100%; height: 220px; object-fit: cover; border-radius: 14px; margin-bottom: 12px; background: #0a0f12; }
+    .inline { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .space { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+    .pill { display: inline-block; padding: 6px 10px; border-radius: 999px; background: rgba(29,184,148,.12); color: #8bf1d4; font-size: 12px; font-weight: 700; }
+    .small { font-size: 13px; }
+    .table { width: 100%; border-collapse: collapse; }
+    .table th, .table td { padding: 12px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    @media (max-width: 960px) {
+      .layout, .item-grid, .metrics { grid-template-columns: 1fr; }
+      .geo-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .topbar { flex-direction: column; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="topbar">
+      <div>
+        <div class="brand">Vinted Autopilot</div>
+        <div class="muted small">Multi-geo search, account system, favorites, Discord watchers and admin control</div>
+      </div>
+      {% if current_user %}
+      <div class="inline">
+        <span class="pill">{{ current_user['username'] }} • {{ current_user['role'] }}</span>
+        <a class="btn secondary" href="{{ url_for('dashboard') }}">Dashboard</a>
+        {% if current_user['role'] == 'admin' %}
+        <a class="btn secondary" href="{{ url_for('admin_panel') }}">Admin</a>
+        {% endif %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <button class="secondary" type="submit">Logout</button>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+    {% for category, message in get_flashed_messages(with_categories=true) %}
+      <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
+    {% block content %}{% endblock %}
+  </div>
+</body>
+</html>

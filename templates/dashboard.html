@@ -1,0 +1,188 @@
+﻿{% extends "base.html" %}
+{% block title %}Dashboard | Vinted Autopilot{% endblock %}
+{% block content %}
+<div class="layout">
+  <div class="panel">
+    <h2 style="margin-top:0;">Search & Watchers</h2>
+    <form method="post">
+      <input type="hidden" name="action" value="search">
+      <div style="margin-bottom:12px;">
+        <label>Brand / item query</label>
+        <input name="query" value="{{ defaults.query }}" required>
+      </div>
+      <div class="row2">
+        <div>
+          <label>Pages per geo</label>
+          <input name="pages" value="{{ defaults.pages }}">
+        </div>
+        <div>
+          <label>Delay</label>
+          <input name="delay" value="{{ defaults.delay }}">
+        </div>
+      </div>
+      <div class="row2" style="margin-top:12px;">
+        <div>
+          <label>Price from</label>
+          <input name="price_from" value="{{ defaults.price_from }}">
+        </div>
+        <div>
+          <label>Price to</label>
+          <input name="price_to" value="{{ defaults.price_to }}">
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <label>Sort order</label>
+        <select name="order">
+          {% for value in ['newest_first', 'relevance', 'price_low_to_high', 'price_high_to_low'] %}
+          <option value="{{ value }}" {% if defaults.order == value %}selected{% endif %}>{{ value }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="margin-top:12px;">
+        <label>Geos</label>
+        <div class="geo-grid">
+          {% for geo_code, geo_url in geo_options.items() %}
+          <label class="geo-pill"><input type="checkbox" name="geo" value="{{ geo_code }}" {% if geo_code in defaults.selected_geos %}checked{% endif %}>{{ geo_code|upper }}</label>
+          {% endfor %}
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <label>Extra catalog params</label>
+        <textarea name="extra_params" placeholder="catalog[]=123&#10;color[]=7">{{ defaults.extra_params }}</textarea>
+      </div>
+      <div class="inline" style="margin-top:14px;">
+        <button type="submit">Search now</button>
+      </div>
+      <hr style="border-color:var(--line); margin:18px 0;">
+      <h3>Create Discord watcher</h3>
+      <div style="margin-bottom:12px;">
+        <label>Watcher name</label>
+        <input name="watcher_name" value="{{ defaults.watcher_name }}">
+      </div>
+      <div style="margin-bottom:12px;">
+        <label>Discord webhook URL</label>
+        <input name="discord_webhook_url" value="{{ defaults.discord_webhook_url }}">
+      </div>
+      <div style="margin-bottom:12px;">
+        <label>Interval minutes</label>
+        <input name="interval_minutes" value="{{ defaults.interval_minutes }}">
+      </div>
+      <button type="submit" name="action" value="create_watcher">Save watcher</button>
+    </form>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <div class="metrics">
+        <div class="metric"><div class="label">Watchers</div><div class="value">{{ watchers|length }}</div></div>
+        <div class="metric"><div class="label">Favorites</div><div class="value">{{ favorites|length }}</div></div>
+        <div class="metric"><div class="label">Geos</div><div class="value">{{ geo_options|length }}</div></div>
+        <div class="metric"><div class="label">Results</div><div class="value">{{ result.unique_count if result else 0 }}</div></div>
+      </div>
+      {% if result %}
+      <div class="inline" style="margin-bottom:14px;">
+        <a class="btn secondary" href="{{ url_for('download', fmt='json', filename=result.json_path|basename) }}">Download JSON</a>
+        <a class="btn secondary" href="{{ url_for('download', fmt='csv', filename=result.csv_path|basename) }}">Download CSV</a>
+        <span class="muted small">Raw: {{ result.raw_count }} • Unique: {{ result.unique_count }}</span>
+      </div>
+      {% endif %}
+      <h2 style="margin-top:0;">Active watchers</h2>
+      <div class="cards">
+        {% for watcher in watchers %}
+        <div class="card">
+          <div class="space"><strong>{{ watcher.name }}</strong><span class="pill">{{ 'enabled' if watcher.enabled else 'paused' }}</span></div>
+          <div class="small muted">{{ watcher.query }} • {{ watcher.geos }} • every {{ watcher.interval_minutes }} min</div>
+          <div class="small muted" style="margin-top:8px;">Last run: {{ watcher.last_run_at or 'never' }}{% if watcher.last_error %} • {{ watcher.last_error }}{% endif %}</div>
+          <div class="inline" style="margin-top:12px;">
+            <form method="post"><input type="hidden" name="action" value="run_watcher"><input type="hidden" name="watcher_id" value="{{ watcher.id }}"><button class="warn" type="submit">Run now</button></form>
+            <form method="post"><input type="hidden" name="action" value="toggle_watcher"><input type="hidden" name="watcher_id" value="{{ watcher.id }}"><input type="hidden" name="enabled" value="{{ 0 if watcher.enabled else 1 }}"><button class="secondary" type="submit">{{ 'Pause' if watcher.enabled else 'Enable' }}</button></form>
+            <form method="post"><input type="hidden" name="action" value="delete_watcher"><input type="hidden" name="watcher_id" value="{{ watcher.id }}"><button class="danger" type="submit">Delete</button></form>
+          </div>
+        </div>
+        {% else %}
+        <div class="card muted">No watchers yet.</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2 style="margin-top:0;">Search results</h2>
+      {% if result and result.items %}
+      <div class="item-grid">
+        {% for item in result.items %}
+        <div class="card item-card">
+          {% if item.image_url %}<img src="{{ item.image_url }}" alt="{{ item.title }}">{% endif %}
+          <div class="space"><strong>{{ item.title }}</strong><span class="pill">{{ item.geo|upper }}</span></div>
+          <div class="small muted" style="margin:8px 0;">{{ item.price }}{% if item.total_price %} • {{ item.total_price }}{% endif %}</div>
+          <div class="small muted">{{ item.brand }}{% if item.size %} • {{ item.size }}{% endif %}{% if item.condition %} • {{ item.condition }}{% endif %}</div>
+          <div class="small muted">Seller: {{ item.seller_country or 'unknown' }}{% if item.seller_city %} / {{ item.seller_city }}{% endif %}</div>
+          <div class="small muted">Listed: {{ item.listing_age_label or 'unknown' }}{% if item.seller_last_online %} • Last online: {{ item.seller_last_online }}{% endif %}</div>
+          <div class="inline" style="margin-top:12px;">
+            <a class="btn secondary" href="{{ item.item_url }}" target="_blank">Open listing</a>
+            <form method="post">
+              <input type="hidden" name="action" value="toggle_favorite">
+              <input type="hidden" name="query" value="{{ defaults.query }}">
+              <input type="hidden" name="pages" value="{{ defaults.pages }}">
+              <input type="hidden" name="delay" value="{{ defaults.delay }}">
+              <input type="hidden" name="price_from" value="{{ defaults.price_from }}">
+              <input type="hidden" name="price_to" value="{{ defaults.price_to }}">
+              <input type="hidden" name="order" value="{{ defaults.order }}">
+              <input type="hidden" name="extra_params" value="{{ defaults.extra_params }}">
+              {% for geo in defaults.selected_geos %}<input type="hidden" name="geo" value="{{ geo }}">{% endfor %}
+              <input type="hidden" name="item_id" value="{{ item.item_id }}">
+              <input type="hidden" name="title" value="{{ item.title }}">
+              <input type="hidden" name="subtitle" value="{{ item.subtitle }}">
+              <input type="hidden" name="brand" value="{{ item.brand }}">
+              <input type="hidden" name="size" value="{{ item.size }}">
+              <input type="hidden" name="condition" value="{{ item.condition }}">
+              <input type="hidden" name="price" value="{{ item.price }}">
+              <input type="hidden" name="total_price" value="{{ item.total_price }}">
+              <input type="hidden" name="currency" value="{{ item.currency }}">
+              <input type="hidden" name="image_url" value="{{ item.image_url }}">
+              <input type="hidden" name="item_url" value="{{ item.item_url }}">
+              <input type="hidden" name="search_url" value="{{ item.search_url }}">
+              <input type="hidden" name="item_geo" value="{{ item.geo }}">
+              <input type="hidden" name="seller_country" value="{{ item.seller_country }}">
+              <input type="hidden" name="seller_city" value="{{ item.seller_city }}">
+              <input type="hidden" name="seller_last_online" value="{{ item.seller_last_online }}">
+              <input type="hidden" name="listing_age_minutes" value="{{ item.listing_age_minutes or '' }}">
+              <input type="hidden" name="listing_age_label" value="{{ item.listing_age_label }}">
+              <button type="submit">{{ 'Remove from favorites' if item.item_url in favorite_urls else 'Add to favorites' }}</button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% elif result %}
+      <div class="card muted">Search finished, but no items matched the current filters.</div>
+      {% else %}
+      <div class="card muted">Run a search to see listings here.</div>
+      {% endif %}
+    </div>
+
+    <div class="panel">
+      <h2 style="margin-top:0;">Favorites</h2>
+      <div class="cards">
+        {% for item in favorites %}
+        <div class="card">
+          <div class="space"><strong>{{ item.title }}</strong><span class="pill">{{ (item.geo or '')|upper }}</span></div>
+          <div class="small muted">{{ item.price }}{% if item.total_price %} • {{ item.total_price }}{% endif %}</div>
+          <div class="small muted">{{ item.seller_country or 'unknown' }}{% if item.seller_city %} / {{ item.seller_city }}{% endif %}</div>
+          <div class="small muted">Listed: {{ item.listing_age_label or 'unknown' }}{% if item.seller_last_online %} • Last online: {{ item.seller_last_online }}{% endif %}</div>
+          <div class="inline" style="margin-top:10px;">
+            <a class="btn secondary" href="{{ item.item_url }}" target="_blank">Open</a>
+            <form method="post">
+              <input type="hidden" name="action" value="toggle_favorite">
+              <input type="hidden" name="item_url" value="{{ item.item_url }}">
+              <button class="danger" type="submit">Remove</button>
+            </form>
+          </div>
+        </div>
+        {% else %}
+        <div class="card muted">No favorites yet.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

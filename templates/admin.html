@@ -1,0 +1,50 @@
+﻿{% extends "base.html" %}
+{% block title %}Admin | Vinted Autopilot{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="panel">
+    <h1 style="margin-top:0;">Admin panel</h1>
+    <p class="muted">Управление аккаунтами, ролями и всеми watcher-ами проекта.</p>
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0;">Users</h2>
+    <table class="table">
+      <thead>
+        <tr><th>User</th><th>Role</th><th>Status</th><th>Watchers</th><th>Favorites</th><th>Actions</th></tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+        <tr>
+          <td><strong>{{ user.username }}</strong><div class="small muted">created {{ user.created_at }}</div></td>
+          <td>{{ user.role }}</td>
+          <td>{{ 'active' if user.active else 'disabled' }}</td>
+          <td>{{ user.watcher_count }}</td>
+          <td>{{ user.favorite_count }}</td>
+          <td>
+            <div class="inline">
+              <form method="post"><input type="hidden" name="action" value="toggle_user_active"><input type="hidden" name="user_id" value="{{ user.id }}"><button class="secondary" type="submit">{{ 'Disable' if user.active else 'Enable' }}</button></form>
+              <form method="post"><input type="hidden" name="action" value="toggle_user_role"><input type="hidden" name="user_id" value="{{ user.id }}"><button class="warn" type="submit">Make {{ 'user' if user.role == 'admin' else 'admin' }}</button></form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0;">All watchers</h2>
+    <div class="cards">
+      {% for watcher in watchers %}
+      <div class="card">
+        <div class="space"><strong>{{ watcher.name }}</strong><span class="pill">{{ watcher.username }}</span></div>
+        <div class="small muted">{{ watcher.query }} • {{ watcher.geos }} • every {{ watcher.interval_minutes }} min</div>
+        <div class="small muted">{{ 'enabled' if watcher.enabled else 'paused' }} • last run: {{ watcher.last_run_at or 'never' }}</div>
+        {% if watcher.last_error %}<div class="small muted">Last error: {{ watcher.last_error }}</div>{% endif %}
+      </div>
+      {% else %}
+      <div class="card muted">No watchers found.</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

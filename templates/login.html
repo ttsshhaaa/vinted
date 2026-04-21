@@ -1,0 +1,42 @@
+﻿{% extends "base.html" %}
+{% block title %}Login | Vinted Autopilot{% endblock %}
+{% block content %}
+<div class="grid" style="grid-template-columns: minmax(0, 560px); justify-content:center;">
+  <div class="panel">
+    <h1 style="margin-top:0;">Account Access</h1>
+    <p class="muted">Первая страница теперь открывается через вход в аккаунт. Можно войти в админку или создать обычного пользователя.</p>
+    <div class="row2">
+      <form method="post" class="card">
+        <h2 style="margin-top:0;">Login</h2>
+        <input type="hidden" name="action" value="login">
+        <div style="margin-bottom:12px;">
+          <label>Username</label>
+          <input name="username" required>
+        </div>
+        <div style="margin-bottom:12px;">
+          <label>Password</label>
+          <input type="password" name="password" required>
+        </div>
+        <button type="submit">Sign in</button>
+      </form>
+      <form method="post" class="card">
+        <h2 style="margin-top:0;">Register</h2>
+        <input type="hidden" name="action" value="register">
+        <div style="margin-bottom:12px;">
+          <label>Username</label>
+          <input name="username" required>
+        </div>
+        <div style="margin-bottom:12px;">
+          <label>Password</label>
+          <input type="password" name="password" required>
+        </div>
+        <button type="submit">Create account</button>
+      </form>
+    </div>
+    <div class="card" style="margin-top:16px;">
+      <div class="space"><strong>Default admin</strong><span class="pill">Change after first login</span></div>
+      <p class="small muted" style="margin-bottom:0;">Username: <strong>{{ admin_username }}</strong> • Password: <strong>{{ admin_password }}</strong></p>
+    </div>
+  </div>
+</div>
+{% endblock %}
