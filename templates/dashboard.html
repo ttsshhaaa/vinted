@@ -56,9 +56,50 @@
       </div>
       <hr style="border-color:var(--line); margin:18px 0;">
       <h3>Create Discord watcher</h3>
+      <div class="small muted" style="margin-bottom:12px;">Watcher uses its own query and filters below. It is independent from the manual search above.</div>
       <div style="margin-bottom:12px;">
         <label>Watcher name</label>
         <input name="watcher_name" value="{{ defaults.watcher_name }}">
+      </div>
+      <div style="margin-bottom:12px;">
+        <label>Watcher query</label>
+        <input name="watcher_query" value="{{ defaults.watcher_query }}">
+      </div>
+      <div class="row2" style="margin-top:12px;">
+        <div>
+          <label>Watcher pages per geo</label>
+          <input name="watcher_pages" value="{{ defaults.watcher_pages }}">
+        </div>
+        <div>
+          <label>Watcher sort order</label>
+          <select name="watcher_order">
+            {% for value in ['newest_first', 'relevance', 'price_low_to_high', 'price_high_to_low'] %}
+            <option value="{{ value }}" {% if defaults.watcher_order == value %}selected{% endif %}>{{ value }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="row2" style="margin-top:12px;">
+        <div>
+          <label>Watcher price from</label>
+          <input name="watcher_price_from" value="{{ defaults.watcher_price_from }}">
+        </div>
+        <div>
+          <label>Watcher price to</label>
+          <input name="watcher_price_to" value="{{ defaults.watcher_price_to }}">
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <label>Watcher geos</label>
+        <div class="geo-grid">
+          {% for geo_code, geo_url in geo_options.items() %}
+          <label class="geo-pill"><input type="checkbox" name="watcher_geo" value="{{ geo_code }}" {% if geo_code in defaults.watcher_selected_geos %}checked{% endif %}>{{ geo_code|upper }}</label>
+          {% endfor %}
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <label>Watcher extra catalog params</label>
+        <textarea name="watcher_extra_params" placeholder="catalog[]=123&#10;color[]=7">{{ defaults.watcher_extra_params }}</textarea>
       </div>
       <div style="margin-bottom:12px;">
         <label>Discord webhook URL</label>

@@ -436,13 +436,13 @@ def create_watcher(user_id: int, form: dict[str, str], selected_geos: list[str])
             (
                 user_id,
                 form["watcher_name"],
-                form["query"],
+                form["watcher_query"],
                 ",".join(selected_geos),
-                int(form["pages"]),
-                safe_int(form["price_from"]),
-                safe_int(form["price_to"]),
-                form["order"],
-                form["extra_params"],
+                safe_int(form["watcher_pages"]) or 1,
+                safe_int(form["watcher_price_from"]),
+                safe_int(form["watcher_price_to"]),
+                form["watcher_order"],
+                form["watcher_extra_params"],
                 form["discord_webhook_url"],
                 int(form["interval_minutes"]),
             ),
@@ -690,6 +690,17 @@ def normalize_dashboard_defaults(form_data: dict | None = None) -> dict:
         "watcher_name": str(source.get("watcher_name", "")).strip(),
         "discord_webhook_url": str(source.get("discord_webhook_url", "")).strip(),
         "interval_minutes": str(source.get("interval_minutes", "5")).strip() or "5",
+        "watcher_query": str(source.get("watcher_query", "")).strip(),
+        "watcher_pages": str(source.get("watcher_pages", "1")).strip() or "1",
+        "watcher_price_from": str(source.get("watcher_price_from", "")).strip(),
+        "watcher_price_to": str(source.get("watcher_price_to", "")).strip(),
+        "watcher_order": str(source.get("watcher_order", "newest_first")).strip() or "newest_first",
+        "watcher_selected_geos": (
+            source.getlist("watcher_geo")
+            if hasattr(source, "getlist")
+            else source.get("watcher_geo", ["fr", "de", "it"])
+        ),
+        "watcher_extra_params": str(source.get("watcher_extra_params", "")).strip(),
     }
 
 
@@ -753,11 +764,11 @@ def dashboard():
             if action == "create_watcher":
                 if not defaults["watcher_name"]:
                     raise ValueError("Watcher name is required.")
-                if not defaults["query"]:
+                if not defaults["watcher_query"]:
                     raise ValueError("Query is required for a watcher.")
                 if not defaults["discord_webhook_url"]:
                     raise ValueError("Discord webhook URL is required.")
-                selected_geos = expand_geos(defaults["selected_geos"])
+                selected_geos = expand_geos(defaults["watcher_selected_geos"])
                 create_watcher(int(g.current_user["id"]), defaults, selected_geos)
                 flash(
                     "Watcher created. Current listings were saved as baseline, so Discord alerts will start only for brand-new listings.",
