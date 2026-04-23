@@ -709,6 +709,25 @@ def send_discord_message(webhook_url: str, text: str) -> None:
     response.raise_for_status()
 
 
+def format_watcher_discord_item(item: dict) -> list[str]:
+    age_minutes = item.get("age_minutes")
+    age_note = ""
+    if age_minutes is None:
+        age_note = " (age unconfirmed)"
+    elif isinstance(age_minutes, int):
+        if age_minutes < 60:
+            age_note = f" ({age_minutes} min ago)"
+        elif age_minutes < 1440:
+            age_note = f" ({age_minutes // 60} h ago)"
+        else:
+            age_note = f" ({age_minutes // 1440} d ago)"
+
+    price = (item.get("price") or "").strip()
+    title = (item.get("title") or "Untitled listing").strip()
+    header = f"{title} — {price}{age_note}" if price else f"{title}{age_note}"
+    return [header, item["item_url"]]
+
+
 def mark_watcher_started(watcher_id: int) -> None:
     with get_db_connection() as connection:
         connection.execute(
@@ -849,15 +868,18 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
         if new_items and watcher["discord_webhook_url"]:
             session_http = requests.Session()
             fresh_items: list[dict] = []
+            fallback_fresh_items: list[dict] = []
             stale_items = 0
             unknown_age_items = 0
             seen_urls: list[str] = []
-            for item in new_items:
+            for index, item in enumerate(new_items):
                 age_minutes = item.get("age_minutes")
                 if age_minutes is None:
                     age_minutes = get_item_age_minutes(session_http, item["item_url"], timeout=30)
                 if age_minutes is None:
                     unknown_age_items += 1
+                    if index < 6:
+                        fallback_fresh_items.append(item)
                     continue
                 if age_minutes <= fresh_window_minutes:
                     item["age_minutes"] = age_minutes
@@ -866,15 +888,17 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
                     stale_items += 1
                     seen_urls.append(item["item_url"])
 
-            if fresh_items:
-                lines = [f"{watcher['name']}: {len(fresh_items)} new item(s)"]
-                for item in fresh_items[:10]:
-                    lines.append(item["title"])
-                    lines.append(item["item_url"])
-                if len(fresh_items) > 10:
-                    lines.append(f"...and {len(fresh_items) - 10} more")
+            items_to_notify = fresh_items or fallback_fresh_items
+            if items_to_notify:
+                lines = [f"{watcher['name']}: {len(items_to_notify)} new item(s)"]
+                if not fresh_items and fallback_fresh_items:
+                    lines.append("Age could not be confirmed quickly, sending top newest-first matches.")
+                for item in items_to_notify[:10]:
+                    lines.extend(format_watcher_discord_item(item))
+                if len(items_to_notify) > 10:
+                    lines.append(f"...and {len(items_to_notify) - 10} more")
                 send_discord_message(watcher["discord_webhook_url"], "\n".join(lines))
-                seen_urls.extend(item["item_url"] for item in fresh_items)
+                seen_urls.extend(item["item_url"] for item in items_to_notify)
 
             if seen_urls:
                 with get_db_connection() as connection:
@@ -888,6 +912,8 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
             notes: list[str] = []
             if fresh_items:
                 notes.append(f"Sent {len(fresh_items)} fresh item(s).")
+            elif fallback_fresh_items:
+                notes.append(f"Sent {len(fallback_fresh_items)} top-match item(s) with unconfirmed age.")
             else:
                 notes.append("Checked successfully, no fresh items found.")
             if stale_items:
@@ -897,10 +923,10 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
             record_watcher_run(
                 watcher["id"],
                 scan_count=result["unique_count"],
-                notified_count=len(fresh_items),
+                notified_count=len(items_to_notify),
                 status_message=" ".join(notes),
             )
-            return len(fresh_items), result["unique_count"]
+            return len(items_to_notify), result["unique_count"]
 
         if new_items:
             with get_db_connection() as connection:
