@@ -1128,6 +1128,13 @@ def dashboard():
     )
 
 
+@app.get("/favorites")
+@login_required
+def favorites_page():
+    favorites = list_favorites(int(g.current_user["id"]))
+    return render_template("favorites.html", favorites=favorites)
+
+
 @app.route("/admin", methods=["GET", "POST"])
 @admin_required
 def admin_panel():
