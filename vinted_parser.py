@@ -36,6 +36,7 @@ API_HEADERS = {
 SEARCH_MODE = os.environ.get("SEARCH_MODE", "lite").strip().lower() or "lite"
 DETAIL_CACHE_TTL_SECONDS = int(os.environ.get("DETAIL_CACHE_TTL_SECONDS", "21600"))
 GEO_COOLDOWN_SECONDS = int(os.environ.get("GEO_COOLDOWN_SECONDS", "1800"))
+MAX_OUTPUT_FILES = int(os.environ.get("MAX_OUTPUT_FILES", "60"))
 DETAIL_CACHE: dict[str, tuple[float, tuple[str, str, str, int | None]]] = {}
 GEO_COOLDOWNS: dict[str, float] = {}
 
@@ -882,6 +883,21 @@ def write_outputs(items: list[Item], output_dir: Path, query: str) -> tuple[Path
     return json_path, csv_path
 
 
+def prune_output_files(output_dir: Path, keep: int = MAX_OUTPUT_FILES) -> None:
+    if keep <= 0 or not output_dir.exists():
+        return
+    files = sorted(
+        output_dir.glob("vinted_*.*"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    for old_file in files[keep:]:
+        try:
+            old_file.unlink(missing_ok=True)
+        except OSError:
+            continue
+
+
 def run_search(
     query: str,
     geos: list[str],
@@ -893,6 +909,7 @@ def run_search(
     extra_params: dict[str, str] | None = None,
     timeout: int = 30,
     output_dir: str | Path = "output",
+    write_outputs_enabled: bool = True,
 ) -> dict:
     extra_params = extra_params or {}
     session = requests.Session()
@@ -921,7 +938,12 @@ def run_search(
             failures.append(f"[{geo}] {exc}")
 
     unique_items = sort_items_by_query_relevance(dedupe_items(all_items), query)
-    json_path, csv_path = write_outputs(unique_items, output_dir=Path(output_dir), query=query)
+    json_path = None
+    csv_path = None
+    if write_outputs_enabled:
+        output_dir = Path(output_dir)
+        prune_output_files(output_dir)
+        json_path, csv_path = write_outputs(unique_items, output_dir=output_dir, query=query)
     return {
         "items": unique_items,
         "raw_count": len(all_items),

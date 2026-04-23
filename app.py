@@ -30,6 +30,7 @@ from vinted_parser import (
     expand_geos,
     get_item_age_minutes,
     parse_extra_params,
+    prune_output_files,
     run_search,
 )
 
@@ -314,6 +315,7 @@ def migrate_legacy_favorites(connection: sqlite3.Connection, admin_user_id: int)
 
 def init_db() -> None:
     ensure_storage()
+    prune_output_files(OUTPUT_DIR)
     with get_db_connection() as connection:
         create_base_tables(connection)
         migrate_legacy_users(connection)
@@ -631,6 +633,7 @@ def prime_watcher_seen_items(watcher_id: int) -> int:
             [line.strip() for line in watcher["extra_params"].splitlines() if line.strip()]
         ),
         output_dir=OUTPUT_DIR,
+        write_outputs_enabled=False,
     )
 
     inserted = 0
@@ -843,6 +846,7 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
                 [line.strip() for line in watcher["extra_params"].splitlines() if line.strip()]
             ),
             output_dir=OUTPUT_DIR,
+            write_outputs_enabled=False,
         )
 
         new_items: list[dict] = []
