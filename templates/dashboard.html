@@ -3,7 +3,9 @@
 {% block content %}
 <div class="layout">
   <div class="panel">
-    <h2 style="margin-top:0;">Search & Watchers</h2>
+    <span class="eyebrow">Search console</span>
+    <h2 class="section-title" style="margin-top:14px;">Search & Watchers</h2>
+    <p class="muted" style="margin-top:0;">Run fast manual searches on the left, then pin the best setup into a live Discord watcher without leaving the control panel.</p>
     <form method="post">
       <input type="hidden" name="action" value="search">
       <div style="margin-bottom:12px;">
@@ -122,6 +124,34 @@
 
   <div class="grid">
     <div class="panel">
+      <div class="hero-card" style="margin-bottom:18px;">
+        <div class="hero-copy">
+          <div class="grid" style="gap:14px;">
+            <span class="eyebrow">Resell command center</span>
+            <h2 style="margin:0; font-size:clamp(28px, 3vw, 48px); line-height:1;">Monitor the market with a sharper, faster dashboard.</h2>
+            <p>Use the search panel to probe any niche, then keep the live watcher stream running with newest-first checks and Discord delivery. Everything below stays functional, but the presentation now feels more like a premium product shell.</p>
+          </div>
+          <div class="hero-bullets">
+            <div><span>Live</span><div>Watchers keep tracking first-page newest listings for rapid alerts.</div></div>
+            <div><span>Save</span><div>Favorites now live on their own page while the top bar always shows the count.</div></div>
+            <div><span>Filter</span><div>Manual search still lets you tune pages, delay, pricing and geos before saving a setup.</div></div>
+          </div>
+        </div>
+        <div class="hero-side">
+          <div>
+            <h3 class="section-title" style="font-size:24px;">Quick state</h3>
+            <p class="muted" style="margin:0;">A compact snapshot of your current workspace before you dive into search results and active watcher jobs.</p>
+          </div>
+          <div class="card">
+            <div class="small muted">Current query</div>
+            <div style="font-size:24px; font-weight:800; margin-top:8px;">{{ defaults.query or 'Waiting for input' }}</div>
+          </div>
+          <div class="card">
+            <div class="small muted">Watcher cadence</div>
+            <div style="font-size:24px; font-weight:800; margin-top:8px;">{{ defaults.watcher_interval_seconds }} sec</div>
+          </div>
+        </div>
+      </div>
       <div class="metrics">
         <div class="metric"><div class="label">Watchers</div><div class="value">{{ watchers|length }}</div></div>
         <div class="metric"><div class="label">Favorites</div><div class="value">{{ favorites|length }}</div></div>

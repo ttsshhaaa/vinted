@@ -1,22 +1,41 @@
 ﻿{% extends "base.html" %}
 {% block title %}Login | Vinted Autopilot{% endblock %}
 {% block content %}
-<div class="grid" style="grid-template-columns: minmax(0, 560px); justify-content:center;">
-  <div class="panel">
-    <h1 style="margin-top:0;">Account Access</h1>
-    <p class="muted">Вход доступен только для уже созданных аккаунтов. Новых пользователей теперь создаёт администратор из админ-панели.</p>
-    <form method="post" class="card">
-      <h2 style="margin-top:0;">Login</h2>
-      <div style="margin-bottom:12px;">
-        <label>Username</label>
-        <input name="username" required>
+<div class="grid">
+  <div class="panel hero-card">
+    <div class="hero-copy">
+      <div class="grid" style="gap:16px;">
+        <span class="eyebrow">Vinted intelligence</span>
+        <h1>Catch fast listings before everyone else.</h1>
+        <p>Multi-geo search, live Discord watchers, favorites tracking and account access now live inside a sharper premium shell. The mood is inspired by the reference site, but the palette stays yours.</p>
       </div>
-      <div style="margin-bottom:12px;">
-        <label>Password</label>
-        <input type="password" name="password" required>
+      <div class="hero-bullets">
+        <div><span>01</span><div>Track fresh listings in multiple geos without bouncing between tabs.</div></div>
+        <div><span>02</span><div>Save products into Favorites and reopen them from a dedicated page later.</div></div>
+        <div><span>03</span><div>Keep access controlled: new users are created only by admin.</div></div>
       </div>
-      <button type="submit">Sign in</button>
-    </form>
+    </div>
+
+    <div class="hero-side">
+      <div>
+        <h2 class="section-title">Account Access</h2>
+        <p class="muted" style="margin:0;">Login is available only for already created accounts. New users are created by the administrator from the admin panel.</p>
+      </div>
+      <form method="post" class="card" style="display:grid; gap:14px;">
+        <div>
+          <label>Username</label>
+          <input name="username" required>
+        </div>
+        <div>
+          <label>Password</label>
+          <input type="password" name="password" required>
+        </div>
+        <button type="submit">Sign in</button>
+      </form>
+      <div class="card">
+        <div class="small muted">Open the dashboard to launch searches, monitor watchers, and manage saved listings without exposing registration on the front page.</div>
+      </div>
+    </div>
   </div>
 </div>
 {% endblock %}
