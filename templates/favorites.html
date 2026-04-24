@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+ï»¿{% extends "base.html" %}
 {% block title %}Favorites | Vinted Autopilot{% endblock %}
 {% block content %}
 <div class="grid">
@@ -18,10 +18,10 @@
       <div class="card item-card">
         {% if item.image_url %}<img src="{{ item.image_url }}" alt="{{ item.title }}">{% endif %}
         <div class="space"><strong>{{ item.title }}</strong><span class="pill">{{ (item.geo or '')|upper }}</span></div>
-        <div class="small muted" style="margin:8px 0;">{{ item.price }}{% if item.total_price %} • {{ item.total_price }}{% endif %}</div>
-        <div class="small muted">{{ item.brand }}{% if item.size %} • {{ item.size }}{% endif %}{% if item.condition %} • {{ item.condition }}{% endif %}</div>
+        <div class="small muted" style="margin:8px 0;">{{ item.price }}{% if item.total_price %} â€¢ {{ item.total_price }}{% endif %}</div>
+        <div class="small muted">{{ item.brand }}{% if item.size %} â€¢ {{ item.size }}{% endif %}{% if item.condition %} â€¢ {{ item.condition }}{% endif %}</div>
         <div class="small muted">Seller: {{ item.seller_country or 'unknown' }}{% if item.seller_city %} / {{ item.seller_city }}{% endif %}</div>
-        <div class="small muted">Listed: {{ item.listing_age_label or 'unknown' }}{% if item.seller_last_online %} • Last online: {{ item.seller_last_online }}{% endif %}</div>
+        <div class="small muted">Listed: {{ item.listing_age_label or 'unknown' }}{% if item.seller_last_online %} â€¢ Last online: {{ item.seller_last_online }}{% endif %}</div>
         <div class="inline" style="margin-top:10px;">
           <a class="btn secondary" href="{{ item.item_url }}" target="_blank">Open</a>
           <form method="post" action="{{ url_for('dashboard') }}">
