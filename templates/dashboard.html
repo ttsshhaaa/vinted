@@ -45,7 +45,7 @@
         <label>Geos</label>
         <div class="geo-grid">
           {% for geo_code, geo_url in geo_options.items() %}
-          <label class="geo-pill"><input type="checkbox" name="geo" value="{{ geo_code }}" {% if geo_code in defaults.selected_geos %}checked{% endif %}>{{ geo_flags.get(geo_code, '') }} {{ geo_code|upper }}</label>
+          <label class="geo-pill"><input type="checkbox" name="geo" value="{{ geo_code }}" {% if geo_code in defaults.selected_geos %}checked{% endif %}><span class="flag-emoji">{{ geo_flags.get(geo_code, '') }}</span>{{ geo_code|upper }}</label>
           {% endfor %}
         </div>
       </div>
@@ -96,7 +96,7 @@
         <label>Watcher geos</label>
         <div class="geo-grid">
           {% for geo_code, geo_url in geo_options.items() %}
-          <label class="geo-pill"><input type="checkbox" name="watcher_geo" value="{{ geo_code }}" {% if geo_code in defaults.watcher_selected_geos %}checked{% endif %}>{{ geo_flags.get(geo_code, '') }} {{ geo_code|upper }}</label>
+          <label class="geo-pill"><input type="checkbox" name="watcher_geo" value="{{ geo_code }}" {% if geo_code in defaults.watcher_selected_geos %}checked{% endif %}><span class="flag-emoji">{{ geo_flags.get(geo_code, '') }}</span>{{ geo_code|upper }}</label>
           {% endfor %}
         </div>
       </div>
