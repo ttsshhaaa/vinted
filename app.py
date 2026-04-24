@@ -71,6 +71,34 @@ WATCHER_MAX_PARALLEL = int(os.environ.get("WATCHER_MAX_PARALLEL", "2"))
 WATCHER_MAX_AGE_CHECK_ITEMS = int(os.environ.get("WATCHER_MAX_AGE_CHECK_ITEMS", "12"))
 DEFAULT_ADMIN_USERNAME = "kon1337"
 DEFAULT_ADMIN_PASSWORD = "thklty13"
+GEO_FLAGS = {
+    "us": "🇺🇸",
+    "uk": "🇬🇧",
+    "fr": "🇫🇷",
+    "de": "🇩🇪",
+    "it": "🇮🇹",
+    "es": "🇪🇸",
+    "nl": "🇳🇱",
+    "be": "🇧🇪",
+    "pt": "🇵🇹",
+    "pl": "🇵🇱",
+    "cz": "🇨🇿",
+    "sk": "🇸🇰",
+    "at": "🇦🇹",
+    "hu": "🇭🇺",
+    "ro": "🇷🇴",
+    "hr": "🇭🇷",
+    "lt": "🇱🇹",
+    "ee": "🇪🇪",
+    "lu": "🇱🇺",
+    "lv": "🇱🇻",
+    "se": "🇸🇪",
+    "si": "🇸🇮",
+    "dk": "🇩🇰",
+    "fi": "🇫🇮",
+    "gr": "🇬🇷",
+    "ie": "🇮🇪",
+}
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1199,6 +1227,7 @@ def dashboard():
     return render_template(
         "dashboard.html",
         geo_options=GEO_DOMAINS,
+        geo_flags=GEO_FLAGS,
         defaults=defaults,
         watchers=watchers,
         favorites=favorites,
