@@ -49,6 +49,8 @@
       gap: 2px;
     }
     .nav-btn.tight { width: 118px; }
+    .nav-form { margin: 0; width: 118px; height: 56px; display: flex; }
+    .nav-form .nav-btn { width: 100%; height: 100%; }
     .nav-icon { font-size: 16px; line-height: 1; }
     .nav-stack { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.05; gap: 3px; min-height: 36px; }
     .nav-stack .count { font-size: 11px; color: #8bf1d4; font-weight: 800; min-height: 12px; }
@@ -147,7 +149,7 @@
           </span>
         </a>
         {% endif %}
-        <form method="post" action="{{ url_for('logout') }}">
+        <form class="nav-form" method="post" action="{{ url_for('logout') }}">
           <button class="secondary icon-btn nav-btn tight" type="submit">
             <span class="nav-stack">
               <span class="count placeholder">0</span>
