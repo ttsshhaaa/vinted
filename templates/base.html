@@ -40,16 +40,20 @@
     .btn.icon-btn { display: inline-flex; align-items: center; gap: 8px; }
     .nav-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     .nav-btn {
-      min-width: 116px;
-      min-height: 48px;
+      width: 118px;
+      height: 56px;
+      padding: 8px 12px;
       justify-content: center;
       text-align: center;
+      flex-direction: column;
+      gap: 2px;
     }
-    .nav-btn.tight { min-width: 92px; }
+    .nav-btn.tight { width: 118px; }
     .nav-icon { font-size: 16px; line-height: 1; }
-    .nav-stack { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.05; gap: 3px; }
-    .nav-stack .count { font-size: 11px; color: #8bf1d4; font-weight: 800; }
-    .nav-stack .label { font-size: 16px; color: white; font-weight: 700; }
+    .nav-stack { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.05; gap: 3px; min-height: 36px; }
+    .nav-stack .count { font-size: 11px; color: #8bf1d4; font-weight: 800; min-height: 12px; }
+    .nav-stack .count.placeholder { visibility: hidden; }
+    .nav-stack .label { font-size: 14px; color: white; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; }
     .btn.secondary, .secondary button, button.secondary {
       background: #22323b; border: 1px solid var(--line);
     }
@@ -124,26 +128,31 @@
       <div class="nav-actions">
         <span class="pill">{{ current_user['username'] }} • {{ current_user['role'] }}</span>
         <a class="btn secondary icon-btn nav-btn" href="{{ url_for('dashboard') }}">
-          <span class="nav-icon" aria-hidden="true">📊</span>
-          <span>Dashboard</span>
+          <span class="nav-stack">
+            <span class="count placeholder">0</span>
+            <span class="label"><span class="nav-icon" aria-hidden="true">📊</span><span>Dashboard</span></span>
+          </span>
         </a>
         <a class="btn secondary icon-btn nav-btn" href="{{ url_for('favorites_page') }}">
-          <span class="nav-icon" aria-hidden="true">🛒</span>
           <span class="nav-stack">
             <span class="count">{{ favorites_count }}</span>
-            <span class="label">Favorites</span>
+            <span class="label"><span class="nav-icon" aria-hidden="true">🛒</span><span>Favorites</span></span>
           </span>
         </a>
         {% if current_user['role'] == 'admin' %}
         <a class="btn secondary icon-btn nav-btn" href="{{ url_for('admin_panel') }}">
-          <span class="nav-icon" aria-hidden="true">🛠️</span>
-          <span>Admin</span>
+          <span class="nav-stack">
+            <span class="count placeholder">0</span>
+            <span class="label"><span class="nav-icon" aria-hidden="true">🛠️</span><span>Admin</span></span>
+          </span>
         </a>
         {% endif %}
         <form method="post" action="{{ url_for('logout') }}">
           <button class="secondary icon-btn nav-btn tight" type="submit">
-            <span class="nav-icon" aria-hidden="true">👋</span>
-            <span>Logout</span>
+            <span class="nav-stack">
+              <span class="count placeholder">0</span>
+              <span class="label"><span class="nav-icon" aria-hidden="true">👋</span><span>Logout</span></span>
+            </span>
           </button>
         </form>
       </div>
