@@ -210,31 +210,6 @@
       <div class="card muted">Run a search to see listings here.</div>
       {% endif %}
     </div>
-
-    <div class="panel">
-      <h2 style="margin-top:0;">Favorites</h2>
-      <div class="cards">
-        {% for item in favorites %}
-        <div class="card item-card">
-          {% if item.image_url %}<img src="{{ item.image_url }}" alt="{{ item.title }}">{% endif %}
-          <div class="space"><strong>{{ item.title }}</strong><span class="pill">{{ (item.geo or '')|upper }}</span></div>
-          <div class="small muted">{{ item.price }}{% if item.total_price %} • {{ item.total_price }}{% endif %}</div>
-          <div class="small muted">{{ item.seller_country or 'unknown' }}{% if item.seller_city %} / {{ item.seller_city }}{% endif %}</div>
-          <div class="small muted">Listed: {{ item.listing_age_label or 'unknown' }}{% if item.seller_last_online %} • Last online: {{ item.seller_last_online }}{% endif %}</div>
-          <div class="inline" style="margin-top:10px;">
-            <a class="btn secondary" href="{{ item.item_url }}" target="_blank">Open</a>
-            <form method="post">
-              <input type="hidden" name="action" value="toggle_favorite">
-              <input type="hidden" name="item_url" value="{{ item.item_url }}">
-              <button class="danger" type="submit">Remove</button>
-            </form>
-          </div>
-        </div>
-        {% else %}
-        <div class="card muted">No favorites yet.</div>
-        {% endfor %}
-      </div>
-    </div>
   </div>
 </div>
 {% endblock %}

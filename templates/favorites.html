@@ -6,22 +6,22 @@
     <div class="space">
       <div>
         <h1 style="margin:0;">Favorites</h1>
-        <div class="muted small" style="margin-top:6px;">Все добавленные объявления открываются здесь отдельной страницей.</div>
+        <div class="muted small" style="margin-top:6px;">All saved listings open here on a separate page.</div>
       </div>
       <span class="pill">{{ favorites|length }} item(s)</span>
     </div>
   </div>
 
   <div class="panel">
-    <div class="cards">
+    <div class="item-grid">
       {% for item in favorites %}
       <div class="card item-card">
         {% if item.image_url %}<img src="{{ item.image_url }}" alt="{{ item.title }}">{% endif %}
         <div class="space"><strong>{{ item.title }}</strong><span class="pill">{{ (item.geo or '')|upper }}</span></div>
-        <div class="small muted" style="margin:8px 0;">{{ item.price }}{% if item.total_price %} • {{ item.total_price }}{% endif %}</div>
-        <div class="small muted">{{ item.brand }}{% if item.size %} • {{ item.size }}{% endif %}{% if item.condition %} • {{ item.condition }}{% endif %}</div>
+        <div class="small muted" style="margin:8px 0;">{{ item.price }}{% if item.total_price %} � {{ item.total_price }}{% endif %}</div>
+        <div class="small muted">{{ item.brand }}{% if item.size %} � {{ item.size }}{% endif %}{% if item.condition %} � {{ item.condition }}{% endif %}</div>
         <div class="small muted">Seller: {{ item.seller_country or 'unknown' }}{% if item.seller_city %} / {{ item.seller_city }}{% endif %}</div>
-        <div class="small muted">Listed: {{ item.listing_age_label or 'unknown' }}{% if item.seller_last_online %} • Last online: {{ item.seller_last_online }}{% endif %}</div>
+        <div class="small muted">Listed: {{ item.listing_age_label or 'unknown' }}{% if item.seller_last_online %} � Last online: {{ item.seller_last_online }}{% endif %}</div>
         <div class="inline" style="margin-top:10px;">
           <a class="btn secondary" href="{{ item.item_url }}" target="_blank">Open</a>
           <form method="post" action="{{ url_for('dashboard') }}">

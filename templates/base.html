@@ -38,6 +38,9 @@
       color: white; background: linear-gradient(135deg, var(--accent), #16876d); font-weight: 700;
     }
     .btn.icon-btn { display: inline-flex; align-items: center; gap: 8px; }
+    .nav-stack { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.05; gap: 3px; }
+    .nav-stack .count { font-size: 11px; color: #8bf1d4; font-weight: 800; }
+    .nav-stack .label { font-size: 16px; color: white; font-weight: 700; }
     .btn.secondary, .secondary button, button.secondary {
       background: #22323b; border: 1px solid var(--line);
     }
@@ -95,7 +98,13 @@
       <div class="inline">
         <span class="pill">{{ current_user['username'] }} • {{ current_user['role'] }}</span>
         <a class="btn secondary" href="{{ url_for('dashboard') }}">Dashboard</a>
-        <a class="btn secondary icon-btn" href="{{ url_for('favorites_page') }}">&#128722; Favorites</a>
+        <a class="btn secondary icon-btn" href="{{ url_for('favorites_page') }}">
+          <span aria-hidden="true">&#128722;</span>
+          <span class="nav-stack">
+            <span class="count">{{ favorites_count }}</span>
+            <span class="label">Favorites</span>
+          </span>
+        </a>
         {% if current_user['role'] == 'admin' %}
         <a class="btn secondary" href="{{ url_for('admin_panel') }}">Admin</a>
         {% endif %}

@@ -431,7 +431,14 @@ def load_current_user() -> None:
 
 @app.context_processor
 def inject_current_user() -> dict:
-    return {"current_user": getattr(g, "current_user", None)}
+    current_user = getattr(g, "current_user", None)
+    favorites_count = 0
+    if current_user is not None:
+        favorites_count = count_favorites(int(current_user["id"]))
+    return {
+        "current_user": current_user,
+        "favorites_count": favorites_count,
+    }
 
 
 def login_required(view):
@@ -468,6 +475,15 @@ def list_favorites(user_id: int) -> list[sqlite3.Row]:
             """,
             (user_id,),
         ).fetchall()
+
+
+def count_favorites(user_id: int) -> int:
+    with get_db_connection() as connection:
+        row = connection.execute(
+            "SELECT COUNT(*) AS count FROM favorites WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    return int(row["count"]) if row else 0
 
 
 def toggle_favorite(user_id: int, form: dict[str, str]) -> bool:
