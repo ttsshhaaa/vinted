@@ -4,6 +4,7 @@ import os
 import sqlite3
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
@@ -26,12 +27,16 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from vinted_parser import (
     GEO_DOMAINS,
+    dedupe_items,
+    DEFAULT_HEADERS,
     enrich_items_for_display,
     expand_geos,
     get_item_age_minutes,
     parse_extra_params,
     prune_output_files,
     run_search,
+    scrape_geo,
+    sort_items_by_query_relevance,
 )
 
 
@@ -59,8 +64,11 @@ def resolve_data_dir() -> Path:
 DATA_DIR = resolve_data_dir()
 OUTPUT_DIR = DATA_DIR / "output"
 DB_PATH = DATA_DIR / "app.db"
-WATCHER_POLL_SECONDS = 5
+WATCHER_POLL_SECONDS = int(os.environ.get("WATCHER_POLL_SECONDS", "2"))
 WATCHER_STARTUP_GRACE_SECONDS = 8
+WATCHER_SEARCH_TIMEOUT_SECONDS = int(os.environ.get("WATCHER_SEARCH_TIMEOUT_SECONDS", "12"))
+WATCHER_MAX_PARALLEL = int(os.environ.get("WATCHER_MAX_PARALLEL", "2"))
+WATCHER_MAX_AGE_CHECK_ITEMS = int(os.environ.get("WATCHER_MAX_AGE_CHECK_ITEMS", "12"))
 DEFAULT_ADMIN_USERNAME = "kon1337"
 DEFAULT_ADMIN_PASSWORD = "thklty13"
 
@@ -71,6 +79,7 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY", "change-me-on-railway")
 
 _watcher_thread_started = False
+_watcher_http = threading.local()
 
 
 def ensure_storage() -> None:
@@ -728,23 +737,68 @@ def send_discord_message(webhook_url: str, text: str) -> None:
     response.raise_for_status()
 
 
-def format_watcher_discord_item(item: dict) -> list[str]:
-    age_minutes = item.get("age_minutes")
-    age_note = ""
-    if age_minutes is None:
-        age_note = " (age unconfirmed)"
-    elif isinstance(age_minutes, int):
-        if age_minutes < 60:
-            age_note = f" ({age_minutes} min ago)"
-        elif age_minutes < 1440:
-            age_note = f" ({age_minutes // 60} h ago)"
-        else:
-            age_note = f" ({age_minutes // 1440} d ago)"
+def get_watcher_http_session() -> requests.Session:
+    session = getattr(_watcher_http, "session", None)
+    if session is None:
+        session = requests.Session()
+        session.headers.update(DEFAULT_HEADERS)
+        _watcher_http.session = session
+    return session
 
-    price = (item.get("price") or "").strip()
+
+def run_watcher_search(watcher: sqlite3.Row) -> dict:
+    session = get_watcher_http_session()
+    all_items = []
+    failures: list[str] = []
+    extra_params = parse_extra_params(
+        [line.strip() for line in watcher["extra_params"].splitlines() if line.strip()]
+    )
+    for geo in expand_geos(watcher["geos"]):
+        try:
+            all_items.extend(
+                scrape_geo(
+                    session=session,
+                    geo=geo,
+                    query=watcher["query"],
+                    pages=1,
+                    delay=0,
+                    order="newest_first",
+                    price_from=watcher["price_from"],
+                    price_to=watcher["price_to"],
+                    extra_params=extra_params,
+                    timeout=WATCHER_SEARCH_TIMEOUT_SECONDS,
+                )
+            )
+        except requests.RequestException as exc:
+            failures.append(f"[{geo}] {exc}")
+    unique_items = sort_items_by_query_relevance(dedupe_items(all_items), watcher["query"])
+    return {
+        "items": unique_items,
+        "raw_count": len(all_items),
+        "unique_count": len(unique_items),
+        "failures": failures,
+    }
+
+
+def resolve_item_age_for_watcher(item_url: str, timeout: int) -> int | None:
+    session = requests.Session()
+    session.headers.update(DEFAULT_HEADERS)
+    try:
+        return get_item_age_minutes(session, item_url, timeout=timeout)
+    finally:
+        session.close()
+
+
+def build_watcher_discord_message(watcher_name: str, item: dict) -> str:
     title = (item.get("title") or "Untitled listing").strip()
-    header = f"{title} — {price}{age_note}" if price else f"{title}{age_note}"
-    return [header, item["item_url"]]
+    price = (item.get("price") or "").strip()
+    geo = (item.get("geo") or "").strip().upper()
+    header = f"{watcher_name} • {title}"
+    if price:
+        header = f"{header} — {price}"
+    if geo:
+        header = f"{header} [{geo}]"
+    return "\n".join([header, item["item_url"]])
 
 
 def mark_watcher_started(watcher_id: int) -> None:
@@ -850,20 +904,7 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
 
     try:
         mark_watcher_started(watcher["id"])
-        result = run_search(
-            query=watcher["query"],
-            geos=expand_geos(watcher["geos"]),
-            pages=1,
-            delay=0,
-            order="newest_first",
-            price_from=watcher["price_from"],
-            price_to=watcher["price_to"],
-            extra_params=parse_extra_params(
-                [line.strip() for line in watcher["extra_params"].splitlines() if line.strip()]
-            ),
-            output_dir=OUTPUT_DIR,
-            write_outputs_enabled=False,
-        )
+        result = run_watcher_search(watcher)
 
         new_items: list[dict] = []
         fresh_window_minutes = max(int(watcher["fresh_minutes"] or 10), 1)
@@ -886,43 +927,54 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
                 )
 
         if new_items and watcher["discord_webhook_url"]:
-            session_http = requests.Session()
             fresh_items: list[dict] = []
-            fallback_fresh_items: list[dict] = []
             stale_items = 0
             unknown_age_items = 0
-            seen_urls: list[str] = []
-            for index, item in enumerate(new_items):
-                age_minutes = item.get("age_minutes")
-                if age_minutes is None:
-                    age_minutes = get_item_age_minutes(session_http, item["item_url"], timeout=30)
+            stale_urls: list[str] = []
+            age_candidates = new_items[: max(WATCHER_MAX_AGE_CHECK_ITEMS, 1)]
+            max_workers = min(4, max(1, len(age_candidates)))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                resolved_ages = list(
+                    executor.map(
+                        lambda current_item: (
+                            current_item["age_minutes"]
+                            if current_item.get("age_minutes") is not None
+                            else resolve_item_age_for_watcher(
+                                current_item["item_url"], WATCHER_SEARCH_TIMEOUT_SECONDS
+                            )
+                        ),
+                        age_candidates,
+                    )
+                )
+
+            for item, age_minutes in zip(age_candidates, resolved_ages):
                 if age_minutes is None:
                     unknown_age_items += 1
-                    if index < 6:
-                        fallback_fresh_items.append(item)
                     continue
                 if age_minutes <= fresh_window_minutes:
                     item["age_minutes"] = age_minutes
                     fresh_items.append(item)
                 else:
                     stale_items += 1
-                    seen_urls.append(item["item_url"])
+                    stale_urls.append(item["item_url"])
 
-            items_to_notify = fresh_items or fallback_fresh_items
-            if items_to_notify:
-                lines = [f"{watcher['name']}: {len(items_to_notify)} new item(s)"]
-                if not fresh_items and fallback_fresh_items:
-                    lines.append("Age could not be confirmed quickly, sending top newest-first matches.")
-                for item in items_to_notify[:10]:
-                    lines.extend(format_watcher_discord_item(item))
-                if len(items_to_notify) > 10:
-                    lines.append(f"...and {len(items_to_notify) - 10} more")
-                send_discord_message(watcher["discord_webhook_url"], "\n".join(lines))
-                seen_urls.extend(item["item_url"] for item in items_to_notify)
-
-            if seen_urls:
+            notified_count = 0
+            for item in fresh_items:
+                send_discord_message(
+                    watcher["discord_webhook_url"],
+                    build_watcher_discord_message(watcher["name"], item),
+                )
                 with get_db_connection() as connection:
-                    for item_url in seen_urls:
+                    connection.execute(
+                        "INSERT OR IGNORE INTO watcher_seen_items (watcher_id, item_url) VALUES (?, ?)",
+                        (watcher["id"], item["item_url"]),
+                    )
+                    connection.commit()
+                notified_count += 1
+
+            if stale_urls:
+                with get_db_connection() as connection:
+                    for item_url in stale_urls:
                         connection.execute(
                             "INSERT OR IGNORE INTO watcher_seen_items (watcher_id, item_url) VALUES (?, ?)",
                             (watcher["id"], item_url),
@@ -931,22 +983,22 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
 
             notes: list[str] = []
             if fresh_items:
-                notes.append(f"Sent {len(fresh_items)} fresh item(s).")
-            elif fallback_fresh_items:
-                notes.append(f"Sent {len(fallback_fresh_items)} top-match item(s) with unconfirmed age.")
+                notes.append(f"Instant alerts sent: {len(fresh_items)}.")
             else:
                 notes.append("Checked successfully, no fresh items found.")
             if stale_items:
                 notes.append(f"old skipped: {stale_items}")
             if unknown_age_items:
                 notes.append(f"age unknown will retry: {unknown_age_items}")
+            if result.get("failures"):
+                notes.append("some geos failed")
             record_watcher_run(
                 watcher["id"],
                 scan_count=result["unique_count"],
-                notified_count=len(items_to_notify),
+                notified_count=notified_count,
                 status_message=" ".join(notes),
             )
-            return len(items_to_notify), result["unique_count"]
+            return notified_count, result["unique_count"]
 
         if new_items:
             with get_db_connection() as connection:
@@ -975,12 +1027,19 @@ def watcher_worker() -> None:
     while True:
         try:
             watchers = [watcher for watcher in list_watchers() if watcher["enabled"]]
-            for watcher in watchers:
-                if is_watcher_due(watcher):
-                    try:
-                        run_single_watcher(int(watcher["id"]))
-                    except Exception:
-                        logger.exception("Watcher %s failed", watcher["id"])
+            due_watchers = [watcher for watcher in watchers if is_watcher_due(watcher)]
+            if due_watchers:
+                max_workers = min(max(WATCHER_MAX_PARALLEL, 1), len(due_watchers))
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(run_single_watcher, int(watcher["id"])): watcher["id"]
+                        for watcher in due_watchers
+                    }
+                    for future, watcher_id in futures.items():
+                        try:
+                            future.result()
+                        except Exception:
+                            logger.exception("Watcher %s failed", watcher_id)
         except Exception:
             logger.exception("Watcher worker loop failed")
         time.sleep(WATCHER_POLL_SECONDS)
