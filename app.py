@@ -105,6 +105,36 @@ GEO_FLAGS = {
     "ie": "🇮🇪",
 }
 
+GEO_FLAG_CODES = {
+    "us": "us",
+    "uk": "gb",
+    "fr": "fr",
+    "de": "de",
+    "it": "it",
+    "es": "es",
+    "nl": "nl",
+    "be": "be",
+    "pt": "pt",
+    "pl": "pl",
+    "cz": "cz",
+    "sk": "sk",
+    "at": "at",
+    "hu": "hu",
+    "ro": "ro",
+    "hr": "hr",
+    "lt": "lt",
+    "ee": "ee",
+    "lu": "lu",
+    "lv": "lv",
+    "se": "se",
+    "si": "si",
+    "dk": "dk",
+    "fi": "fi",
+    "gr": "gr",
+    "ie": "ie",
+    "jp": "jp",
+}
+
 TRANSLATIONS = {
     "en": {
         "dashboard": "Dashboard",
@@ -2029,6 +2059,7 @@ def dashboard():
         "dashboard.html",
         geo_options=GEO_DOMAINS,
         geo_flags=GEO_FLAGS,
+        geo_flag_codes=GEO_FLAG_CODES,
         defaults=defaults,
         watchers=watchers,
         favorites=favorites,
