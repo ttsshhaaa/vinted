@@ -28,11 +28,13 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from vinted_parser import (
     GEO_DOMAINS,
+    get_geo_cooldown_seconds_left,
     dedupe_items,
     DEFAULT_HEADERS,
     enrich_items_for_display,
     expand_geos,
     get_item_age_minutes,
+    is_geo_in_cooldown,
     parse_extra_params,
     prune_output_files,
     run_search,
@@ -71,35 +73,106 @@ WATCHER_SEARCH_TIMEOUT_SECONDS = int(os.environ.get("WATCHER_SEARCH_TIMEOUT_SECO
 WATCHER_MAX_PARALLEL = int(os.environ.get("WATCHER_MAX_PARALLEL", "2"))
 WATCHER_MAX_AGE_CHECK_ITEMS = int(os.environ.get("WATCHER_MAX_AGE_CHECK_ITEMS", "12"))
 WATCHER_SEEN_RETENTION_DAYS = int(os.environ.get("WATCHER_SEEN_RETENTION_DAYS", "5"))
+WATCHER_ULTRA_TOP_N = int(os.environ.get("WATCHER_ULTRA_TOP_N", "5"))
 DEFAULT_ADMIN_USERNAME = "kon1337"
 DEFAULT_ADMIN_PASSWORD = "thklty13"
 GEO_FLAGS = {
-    "us": "us",
-    "uk": "gb",
-    "fr": "fr",
-    "de": "de",
-    "it": "it",
-    "es": "es",
-    "nl": "nl",
-    "be": "be",
-    "pt": "pt",
-    "pl": "pl",
-    "cz": "cz",
-    "sk": "sk",
-    "at": "at",
-    "hu": "hu",
-    "ro": "ro",
-    "hr": "hr",
-    "lt": "lt",
-    "ee": "ee",
-    "lu": "lu",
-    "lv": "lv",
-    "se": "se",
-    "si": "si",
-    "dk": "dk",
-    "fi": "fi",
-    "gr": "gr",
-    "ie": "ie",
+    "us": "🇺🇸",
+    "uk": "🇬🇧",
+    "fr": "🇫🇷",
+    "de": "🇩🇪",
+    "it": "🇮🇹",
+    "es": "🇪🇸",
+    "nl": "🇳🇱",
+    "be": "🇧🇪",
+    "pt": "🇵🇹",
+    "pl": "🇵🇱",
+    "cz": "🇨🇿",
+    "sk": "🇸🇰",
+    "at": "🇦🇹",
+    "hu": "🇭🇺",
+    "ro": "🇷🇴",
+    "hr": "🇭🇷",
+    "lt": "🇱🇹",
+    "ee": "🇪🇪",
+    "lu": "🇱🇺",
+    "lv": "🇱🇻",
+    "se": "🇸🇪",
+    "si": "🇸🇮",
+    "dk": "🇩🇰",
+    "fi": "🇫🇮",
+    "gr": "🇬🇷",
+    "ie": "🇮🇪",
+}
+
+TRANSLATIONS = {
+    "en": {
+        "dashboard": "Dashboard",
+        "favorites": "Favorites",
+        "admin": "Admin",
+        "logout": "Logout",
+        "search_watchers": "Search & Watchers",
+        "create_watcher": "Create Discord watcher",
+        "search_now": "Search now",
+        "save_watcher": "Save watcher",
+        "run_now": "Run now",
+        "pause": "Pause",
+        "enable": "Enable",
+        "delete": "Delete",
+        "test_webhook": "Test webhook",
+        "active_watchers": "Active watchers",
+        "search_results": "Search results",
+        "working": "working",
+        "cooldown": "cooldown",
+        "warning": "warning",
+        "idle": "idle",
+        "paused": "paused",
+    },
+    "ru": {
+        "dashboard": "Панель",
+        "favorites": "Избранное",
+        "admin": "Админ",
+        "logout": "Выйти",
+        "search_watchers": "Поиск и вотчеры",
+        "create_watcher": "Создать Discord watcher",
+        "search_now": "Искать",
+        "save_watcher": "Сохранить watcher",
+        "run_now": "Запустить",
+        "pause": "Пауза",
+        "enable": "Включить",
+        "delete": "Удалить",
+        "test_webhook": "Тест webhook",
+        "active_watchers": "Активные watcher-ы",
+        "search_results": "Результаты поиска",
+        "working": "работает",
+        "cooldown": "кулдаун",
+        "warning": "ошибка",
+        "idle": "ожидание",
+        "paused": "пауза",
+    },
+}
+
+TRANSLATIONS["ru"] = {
+    "dashboard": "Панель",
+    "favorites": "Избранное",
+    "admin": "Админ",
+    "logout": "Выйти",
+    "search_watchers": "Поиск и вотчеры",
+    "create_watcher": "Создать Discord watcher",
+    "search_now": "Искать",
+    "save_watcher": "Сохранить watcher",
+    "run_now": "Запустить",
+    "pause": "Пауза",
+    "enable": "Включить",
+    "delete": "Удалить",
+    "test_webhook": "Тест webhook",
+    "active_watchers": "Активные watcher-ы",
+    "search_results": "Результаты поиска",
+    "working": "работает",
+    "cooldown": "кулдаун",
+    "warning": "ошибка",
+    "idle": "ожидание",
+    "paused": "пауза",
 }
 
 logging.basicConfig(level=logging.INFO)
@@ -339,6 +412,19 @@ def build_item_analytics(items: list[object], query: str = "") -> list[object]:
     return items
 
 
+def normalize_signature_text(value: str) -> str:
+    normalized = re.sub(r"\s+", " ", str(value or "").strip().casefold())
+    return re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
+
+
+def build_item_signature(item_id: str | None, title: str | None) -> str:
+    normalized_title = normalize_signature_text(title or "")
+    normalized_id = normalize_signature_text(item_id or "")
+    if normalized_id and normalized_title:
+        return f"{normalized_id}:{normalized_title}"
+    return normalized_id or normalized_title
+
+
 def create_base_tables(connection: sqlite3.Connection) -> None:
     connection.execute(
         """
@@ -378,7 +464,10 @@ def create_base_tables(connection: sqlite3.Connection) -> None:
             last_success_at TEXT,
             last_notification_at TEXT,
             last_notification_count INTEGER NOT NULL DEFAULT 0,
+            last_notification_title TEXT,
+            last_notification_url TEXT,
             last_scan_count INTEGER NOT NULL DEFAULT 0,
+            mode TEXT NOT NULL DEFAULT 'balanced',
             status_message TEXT DEFAULT '',
             last_error TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -391,6 +480,7 @@ def create_base_tables(connection: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS watcher_seen_items (
             watcher_id INTEGER NOT NULL,
             item_url TEXT NOT NULL,
+            item_signature TEXT,
             first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (watcher_id, item_url),
             FOREIGN KEY (watcher_id) REFERENCES watchers(id) ON DELETE CASCADE
@@ -537,6 +627,23 @@ def migrate_legacy_favorites(connection: sqlite3.Connection, admin_user_id: int)
     connection.execute("DROP TABLE favorites_legacy")
 
 
+def ensure_watcher_schema(connection: sqlite3.Connection) -> None:
+    watcher_columns = column_names(connection, "watchers")
+    if "last_notification_title" not in watcher_columns:
+        connection.execute("ALTER TABLE watchers ADD COLUMN last_notification_title TEXT")
+    if "last_notification_url" not in watcher_columns:
+        connection.execute("ALTER TABLE watchers ADD COLUMN last_notification_url TEXT")
+    if "mode" not in watcher_columns:
+        connection.execute("ALTER TABLE watchers ADD COLUMN mode TEXT NOT NULL DEFAULT 'balanced'")
+
+    seen_columns = column_names(connection, "watcher_seen_items")
+    if "item_signature" not in seen_columns:
+        connection.execute("ALTER TABLE watcher_seen_items ADD COLUMN item_signature TEXT")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_watcher_seen_signature ON watcher_seen_items (watcher_id, item_signature)"
+    )
+
+
 def init_db() -> None:
     ensure_storage()
     prune_output_files(OUTPUT_DIR)
@@ -546,6 +653,7 @@ def init_db() -> None:
         admin_user_id = ensure_admin_user(connection)
         migrate_legacy_watchers(connection, admin_user_id)
         migrate_legacy_favorites(connection, admin_user_id)
+        ensure_watcher_schema(connection)
         connection.execute(
             "UPDATE watchers SET run_duration_minutes = NULL, run_until_at = NULL "
             "WHERE run_duration_minutes IS NOT NULL OR run_until_at IS NOT NULL"
@@ -660,6 +768,16 @@ def load_current_user() -> None:
         g.current_user = None
 
 
+def get_current_lang() -> str:
+    lang = str(session.get("lang", "en")).strip().lower()
+    return lang if lang in TRANSLATIONS else "en"
+
+
+def t(key: str) -> str:
+    lang = get_current_lang()
+    return TRANSLATIONS.get(lang, {}).get(key, TRANSLATIONS["en"].get(key, key))
+
+
 @app.context_processor
 def inject_current_user() -> dict:
     current_user = getattr(g, "current_user", None)
@@ -669,6 +787,8 @@ def inject_current_user() -> dict:
     return {
         "current_user": current_user,
         "favorites_count": favorites_count,
+        "current_lang": get_current_lang(),
+        "t": t,
     }
 
 
@@ -779,8 +899,9 @@ def list_watchers(user_id: int | None = None) -> list[sqlite3.Row]:
             watchers.run_duration_minutes, watchers.run_until_at, watchers.enabled,
             watchers.last_started_at, watchers.last_run_at, watchers.last_success_at,
             watchers.last_notification_at, watchers.last_notification_count,
+            watchers.last_notification_title, watchers.last_notification_url,
             watchers.last_scan_count, watchers.status_message, watchers.last_error,
-            watchers.created_at
+            watchers.mode, watchers.created_at
         FROM watchers
         JOIN users ON users.id = watchers.user_id
     """
@@ -816,8 +937,8 @@ def create_watcher(user_id: int, form: dict[str, str], selected_geos: list[str])
             INSERT INTO watchers (
                 user_id, name, query, geos, pages, price_from, price_to,
                 order_name, extra_params, discord_webhook_url, interval_minutes, interval_seconds,
-                fresh_minutes, run_duration_minutes, run_until_at, enabled
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                fresh_minutes, run_duration_minutes, run_until_at, mode, enabled
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             """,
             (
                 user_id,
@@ -835,6 +956,7 @@ def create_watcher(user_id: int, form: dict[str, str], selected_geos: list[str])
                 max(safe_int(form["watcher_fresh_minutes"]) or 10, 1),
                 None,
                 None,
+                form.get("watcher_mode", "balanced").strip() or "balanced",
             ),
         )
         watcher_id = int(cursor.lastrowid)
@@ -849,6 +971,7 @@ def create_watcher(user_id: int, form: dict[str, str], selected_geos: list[str])
                     f"Query: {form['watcher_query']}",
                     f"Geos: {', '.join(selected_geos).upper()}",
                     "Sort: newest_first",
+                    f"Mode: {(form.get('watcher_mode', 'balanced').strip() or 'balanced').capitalize()}",
                     f"Check every: {max(safe_int(form['watcher_interval_seconds']) or 15, 5)} sec",
                     f"Fresh window: {max(safe_int(form['watcher_fresh_minutes']) or 10, 1)} min",
                     "Run mode: continuous until paused manually",
@@ -886,15 +1009,21 @@ def prime_watcher_seen_items(watcher_id: int) -> int:
     inserted = 0
     with get_db_connection() as connection:
         for item in result["items"]:
+            item_signature = build_item_signature(item.item_id, item.title)
             exists = connection.execute(
-                "SELECT 1 FROM watcher_seen_items WHERE watcher_id = ? AND item_url = ?",
-                (watcher_id, item.item_url),
+                """
+                SELECT 1
+                FROM watcher_seen_items
+                WHERE watcher_id = ?
+                  AND (item_url = ? OR (item_signature IS NOT NULL AND item_signature = ?))
+                """,
+                (watcher_id, item.item_url, item_signature),
             ).fetchone()
             if exists:
                 continue
             connection.execute(
-                "INSERT INTO watcher_seen_items (watcher_id, item_url) VALUES (?, ?)",
-                (watcher_id, item.item_url),
+                "INSERT INTO watcher_seen_items (watcher_id, item_url, item_signature) VALUES (?, ?, ?)",
+                (watcher_id, item.item_url, item_signature or None),
             )
             inserted += 1
         connection.execute(
@@ -973,6 +1102,20 @@ def send_discord_message(webhook_url: str, text: str) -> None:
     response.raise_for_status()
 
 
+def send_watcher_test_ping(watcher: sqlite3.Row) -> None:
+    mode = str(watcher["mode"] or "balanced").capitalize()
+    lines = [
+        f"Watcher test: {watcher['name']}",
+        f"Query: {watcher['query']}",
+        f"Geos: {str(watcher['geos']).upper()}",
+        f"Mode: {mode}",
+        f"Check every: {int(watcher['interval_seconds'] or 15)} sec",
+        f"Fresh window: {int(watcher['fresh_minutes'] or 10)} min",
+        "Webhook is working and ready for live alerts.",
+    ]
+    send_discord_message(watcher["discord_webhook_url"], "\n".join(lines))
+
+
 def get_watcher_http_session() -> requests.Session:
     session = getattr(_watcher_http, "session", None)
     if session is None:
@@ -986,25 +1129,28 @@ def run_watcher_search(watcher: sqlite3.Row) -> dict:
     session = get_watcher_http_session()
     all_items = []
     failures: list[str] = []
+    watcher_mode = str(watcher["mode"] or "balanced").strip().lower()
+    top_n = WATCHER_ULTRA_TOP_N if watcher_mode == "ultra" else 0
     extra_params = parse_extra_params(
         [line.strip() for line in watcher["extra_params"].splitlines() if line.strip()]
     )
     for geo in expand_geos(watcher["geos"]):
         try:
-            all_items.extend(
-                scrape_geo(
-                    session=session,
-                    geo=geo,
-                    query=watcher["query"],
-                    pages=1,
-                    delay=0,
-                    order="newest_first",
-                    price_from=watcher["price_from"],
-                    price_to=watcher["price_to"],
-                    extra_params=extra_params,
-                    timeout=WATCHER_SEARCH_TIMEOUT_SECONDS,
-                )
+            geo_items = scrape_geo(
+                session=session,
+                geo=geo,
+                query=watcher["query"],
+                pages=1,
+                delay=0,
+                order="newest_first",
+                price_from=watcher["price_from"],
+                price_to=watcher["price_to"],
+                extra_params=extra_params,
+                timeout=WATCHER_SEARCH_TIMEOUT_SECONDS,
             )
+            if top_n > 0:
+                geo_items = geo_items[:top_n]
+            all_items.extend(geo_items)
         except requests.RequestException as exc:
             failures.append(f"[{geo}] {exc}")
     unique_items = sort_items_by_query_relevance(dedupe_items(all_items), watcher["query"])
@@ -1067,6 +1213,47 @@ def build_watcher_discord_message(watcher_name: str, item: dict) -> str:
     return "\n".join([header, item["item_url"]])
 
 
+def build_watcher_discord_message_rich(watcher_name: str, item: dict) -> str:
+    title = (item.get("title") or "Untitled listing").strip()
+    price = (item.get("price") or "").strip()
+    geo = (item.get("geo") or "").strip().upper()
+    header = f"{watcher_name} • {title}"
+    if price:
+        header = f"{header} — {price}"
+    if geo:
+        header = f"{header} [{geo}]"
+
+    analytics = item.get("analytics") or {}
+    lines = [header, item["item_url"]]
+    if analytics:
+        lines.extend(
+            [
+                f"Price: {analytics.get('price', 'unknown')}",
+                f"Market: {analytics.get('market', 'not enough comps')}",
+                f"Potential: {analytics.get('potential', 'flat')}",
+                f"Comps: {analytics.get('comps', 0)}",
+                f"Age: {analytics.get('age', 'unknown')}",
+                f"Size: {analytics.get('size', 'Other')}",
+                f"Condition: {analytics.get('condition', 'unknown')}",
+                f"Category: {analytics.get('category', 'Other')}",
+                f"Risk: {analytics.get('risk', 'unknown')}",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def build_watcher_discord_message(watcher_name: str, item: dict) -> str:
+    title = (item.get("title") or "Untitled listing").strip()
+    price = (item.get("price") or "").strip()
+    geo = (item.get("geo") or "").strip().upper()
+    header = f"{watcher_name} • {title}"
+    if price:
+        header = f"{header} — {price}"
+    if geo:
+        header = f"{header} [{geo}]"
+    return "\n".join([header, item["item_url"]])
+
+
 def mark_watcher_started(watcher_id: int) -> None:
     with get_db_connection() as connection:
         connection.execute(
@@ -1087,6 +1274,8 @@ def record_watcher_run(
     error: str | None = None,
     scan_count: int = 0,
     notified_count: int = 0,
+    last_sent_title: str | None = None,
+    last_sent_url: str | None = None,
     status_message: str = "",
 ) -> None:
     with get_db_connection() as connection:
@@ -1112,10 +1301,22 @@ def record_watcher_run(
                     last_scan_count = ?,
                     last_notification_count = ?,
                     last_notification_at = CASE WHEN ? > 0 THEN CURRENT_TIMESTAMP ELSE last_notification_at END,
+                    last_notification_title = CASE WHEN ? > 0 THEN ? ELSE last_notification_title END,
+                    last_notification_url = CASE WHEN ? > 0 THEN ? ELSE last_notification_url END,
                     status_message = ?
                 WHERE id = ?
                 """,
-                (scan_count, notified_count, notified_count, status_message, watcher_id),
+                (
+                    scan_count,
+                    notified_count,
+                    notified_count,
+                    notified_count,
+                    last_sent_title,
+                    notified_count,
+                    last_sent_url,
+                    status_message,
+                    watcher_id,
+                ),
             )
         connection.commit()
 
@@ -1134,10 +1335,22 @@ def decorate_watcher_statuses(watchers: list[sqlite3.Row]) -> list[dict]:
     decorated: list[dict] = []
     for watcher in watchers:
         item = dict(watcher)
+        watcher_geos = expand_geos(str(watcher["geos"]).split(","))
+        blocked_geos = [
+            {
+                "geo": geo,
+                "seconds_left": get_geo_cooldown_seconds_left(geo),
+            }
+            for geo in watcher_geos
+            if is_geo_in_cooldown(geo)
+        ]
+        item["blocked_geos"] = blocked_geos
         state = "paused"
         if watcher["enabled"]:
             state = "working"
-            if watcher["last_error"]:
+            if blocked_geos:
+                state = "cooldown"
+            elif watcher["last_error"]:
                 state = "warning"
             last_run = parse_sqlite_timestamp(watcher["last_run_at"])
             grace_seconds = max(int(watcher["interval_seconds"] or 15) * 3, 30)
@@ -1176,28 +1389,35 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
         fresh_window_minutes = max(int(watcher["fresh_minutes"] or 10), 1)
         with get_db_connection() as connection:
             for item in result["items"]:
+                item_signature = build_item_signature(item.item_id, item.title)
                 exists = connection.execute(
-                    "SELECT 1 FROM watcher_seen_items WHERE watcher_id = ? AND item_url = ?",
-                    (watcher["id"], item.item_url),
+                    """
+                    SELECT 1
+                    FROM watcher_seen_items
+                    WHERE watcher_id = ?
+                      AND (item_url = ? OR (item_signature IS NOT NULL AND item_signature = ?))
+                    """,
+                    (watcher["id"], item.item_url, item_signature),
                 ).fetchone()
                 if exists:
                     continue
                 new_items.append(
                     {
+                        "item_id": item.item_id,
                         "title": item.title,
                         "price": item.price,
                         "geo": item.geo.upper(),
                         "item_url": item.item_url,
                         "age_minutes": item.listing_age_minutes,
                         "analytics": getattr(item, "analytics", {}),
+                        "item_signature": item_signature,
                     }
                 )
 
         if new_items and watcher["discord_webhook_url"]:
             fresh_items: list[dict] = []
-            stale_items = 0
+            stale_items: list[dict] = []
             unknown_age_items = 0
-            stale_urls: list[str] = []
             age_candidates = new_items[: max(WATCHER_MAX_AGE_CHECK_ITEMS, 1)]
             max_workers = min(4, max(1, len(age_candidates)))
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -1222,10 +1442,10 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
                     item["age_minutes"] = age_minutes
                     fresh_items.append(item)
                 else:
-                    stale_items += 1
-                    stale_urls.append(item["item_url"])
+                    stale_items.append(item)
 
             notified_count = 0
+            last_sent_item: dict | None = None
             for item in fresh_items:
                 send_discord_message(
                     watcher["discord_webhook_url"],
@@ -1233,18 +1453,23 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
                 )
                 with get_db_connection() as connection:
                     connection.execute(
-                        "INSERT OR IGNORE INTO watcher_seen_items (watcher_id, item_url) VALUES (?, ?)",
-                        (watcher["id"], item["item_url"]),
+                        "INSERT OR IGNORE INTO watcher_seen_items (watcher_id, item_url, item_signature) VALUES (?, ?, ?)",
+                        (watcher["id"], item["item_url"], item.get("item_signature") or None),
                     )
                     connection.commit()
                 notified_count += 1
+                last_sent_item = item
 
-            if stale_urls:
+            if stale_items:
                 with get_db_connection() as connection:
-                    for item_url in stale_urls:
+                    for stale_item in stale_items:
                         connection.execute(
-                            "INSERT OR IGNORE INTO watcher_seen_items (watcher_id, item_url) VALUES (?, ?)",
-                            (watcher["id"], item_url),
+                            "INSERT OR IGNORE INTO watcher_seen_items (watcher_id, item_url, item_signature) VALUES (?, ?, ?)",
+                            (
+                                watcher["id"],
+                                stale_item["item_url"],
+                                stale_item.get("item_signature") or None,
+                            ),
                         )
                     connection.commit()
 
@@ -1254,7 +1479,7 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
             else:
                 notes.append("Checked successfully, no fresh items found.")
             if stale_items:
-                notes.append(f"old skipped: {stale_items}")
+                notes.append(f"old skipped: {len(stale_items)}")
             if unknown_age_items:
                 notes.append(f"age unknown will retry: {unknown_age_items}")
             if result.get("failures"):
@@ -1263,6 +1488,8 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
                 watcher["id"],
                 scan_count=result["unique_count"],
                 notified_count=notified_count,
+                last_sent_title=last_sent_item["title"] if last_sent_item else None,
+                last_sent_url=last_sent_item["item_url"] if last_sent_item else None,
                 status_message=" ".join(notes),
             )
             return notified_count, result["unique_count"]
@@ -1271,8 +1498,8 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
             with get_db_connection() as connection:
                 for item in new_items:
                     connection.execute(
-                        "INSERT OR IGNORE INTO watcher_seen_items (watcher_id, item_url) VALUES (?, ?)",
-                        (watcher["id"], item["item_url"]),
+                        "INSERT OR IGNORE INTO watcher_seen_items (watcher_id, item_url, item_signature) VALUES (?, ?, ?)",
+                        (watcher["id"], item["item_url"], item.get("item_signature") or None),
                     )
                 connection.commit()
 
@@ -1350,6 +1577,7 @@ def normalize_dashboard_defaults(form_data: dict | None = None) -> dict:
         "watcher_price_to": str(source.get("watcher_price_to", "")).strip(),
         "watcher_interval_seconds": str(source.get("watcher_interval_seconds", "15")).strip() or "15",
         "watcher_fresh_minutes": str(source.get("watcher_fresh_minutes", "10")).strip() or "10",
+        "watcher_mode": str(source.get("watcher_mode", "balanced")).strip() or "balanced",
         "watcher_selected_geos": (
             source.getlist("watcher_geo")
             if hasattr(source, "getlist")
@@ -1387,6 +1615,12 @@ def logout():
     return redirect(url_for("login"))
 
 
+@app.get("/lang/<code>")
+def set_language(code: str):
+    session["lang"] = "ru" if str(code).lower() == "ru" else "en"
+    return redirect(request.referrer or url_for("login"))
+
+
 @app.route("/dashboard", methods=["GET", "POST"])
 @login_required
 def dashboard():
@@ -1414,7 +1648,7 @@ def dashboard():
                 )
                 return redirect(url_for("dashboard"))
 
-            if action in {"toggle_watcher", "delete_watcher", "run_watcher"}:
+            if action in {"toggle_watcher", "delete_watcher", "run_watcher", "test_watcher_webhook"}:
                 watcher_id = int(form.get("watcher_id", "0"))
                 watcher = get_watcher_for_user(
                     watcher_id,
@@ -1429,6 +1663,12 @@ def dashboard():
                     return redirect(url_for("dashboard"))
                 if action == "delete_watcher":
                     delete_watcher(watcher_id)
+                    return redirect(url_for("dashboard"))
+                if action == "test_watcher_webhook":
+                    if not watcher["discord_webhook_url"]:
+                        raise ValueError("No Discord webhook configured for this watcher.")
+                    send_watcher_test_ping(watcher)
+                    flash("Test webhook sent successfully.", "info")
                     return redirect(url_for("dashboard"))
                 new_count, total_count = run_single_watcher(watcher_id)
                 flash(

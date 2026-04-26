@@ -90,6 +90,10 @@
     .btn.icon-btn { display: inline-flex; align-items: center; gap: 8px; }
     .nav-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     .nav-actions form { margin: 0; display: flex; align-items: stretch; }
+    .topbar-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+    .lang-switch { display: inline-flex; align-items: center; gap: 6px; padding: 6px; border: 1px solid var(--line); border-radius: 999px; background: rgba(10, 20, 22, 0.82); }
+    .lang-switch a { padding: 7px 10px; border-radius: 999px; color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+    .lang-switch a.active { color: white; background: rgba(29,184,148,.18); }
     .nav-btn {
       width: 118px;
       height: 56px;
@@ -324,28 +328,39 @@
     <div class="topbar">
       <div>
         <div class="brand">Vinted Autopilot</div>
-        <div class="muted small">Multi-geo search, account system, favorites, Discord watchers and admin control</div>
+        <div class="muted small">
+          {% if current_lang == 'ru' %}
+          Мульти-гео поиск, аккаунты, избранное, Discord watcher-ы и админ-контроль
+          {% else %}
+          Multi-geo search, account system, favorites, Discord watchers and admin control
+          {% endif %}
+        </div>
       </div>
+      <div class="topbar-right">
+        <div class="lang-switch">
+          <a href="{{ url_for('set_language', code='en') }}" class="{% if current_lang == 'en' %}active{% endif %}">EN</a>
+          <a href="{{ url_for('set_language', code='ru') }}" class="{% if current_lang == 'ru' %}active{% endif %}">RU</a>
+        </div>
       {% if current_user %}
       <div class="nav-actions">
         <span class="pill">{{ current_user['username'] }} • {{ current_user['role'] }}</span>
         <a class="btn secondary icon-btn nav-btn" href="{{ url_for('dashboard') }}">
           <span class="nav-stack">
             <span class="count placeholder">0</span>
-            <span class="label"><span class="nav-icon" aria-hidden="true">📊</span><span>Dashboard</span></span>
+            <span class="label"><span class="nav-icon" aria-hidden="true">📊</span><span>{{ t('dashboard') }}</span></span>
           </span>
         </a>
         <a class="btn secondary icon-btn nav-btn" href="{{ url_for('favorites_page') }}">
           <span class="nav-stack">
             <span class="count">{{ favorites_count }}</span>
-            <span class="label"><span class="nav-icon" aria-hidden="true">🛒</span><span>Favorites</span></span>
+            <span class="label"><span class="nav-icon" aria-hidden="true">🛒</span><span>{{ t('favorites') }}</span></span>
           </span>
         </a>
         {% if current_user['role'] == 'admin' %}
         <a class="btn secondary icon-btn nav-btn" href="{{ url_for('admin_panel') }}">
           <span class="nav-stack">
             <span class="count placeholder">0</span>
-            <span class="label"><span class="nav-icon" aria-hidden="true">🛠️</span><span>Admin</span></span>
+            <span class="label"><span class="nav-icon" aria-hidden="true">🛠️</span><span>{{ t('admin') }}</span></span>
           </span>
         </a>
         {% endif %}
@@ -353,7 +368,7 @@
           <button class="secondary icon-btn nav-btn tight" type="submit">
             <span class="nav-stack">
               <span class="count placeholder">0</span>
-              <span class="label"><span class="nav-icon" aria-hidden="true">👋</span><span>Logout</span></span>
+              <span class="label"><span class="nav-icon" aria-hidden="true">👋</span><span>{{ t('logout') }}</span></span>
             </span>
           </button>
         </form>

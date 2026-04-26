@@ -477,6 +477,13 @@ def mark_geo_cooldown(geo: str) -> None:
     GEO_COOLDOWNS[geo] = time.time() + GEO_COOLDOWN_SECONDS
 
 
+def get_geo_cooldown_seconds_left(geo: str) -> int:
+    until = GEO_COOLDOWNS.get(geo)
+    if not until:
+        return 0
+    return max(int(until - time.time()), 0)
+
+
 def format_money(raw_value: dict | None) -> str:
     if not raw_value:
         return ""

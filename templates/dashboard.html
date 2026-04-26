@@ -1,11 +1,11 @@
 ﻿{% extends "base.html" %}
-{% block title %}Dashboard | Vinted Autopilot{% endblock %}
+{% block title %}{{ t('dashboard') }} | Vinted Autopilot{% endblock %}
 {% block content %}
 <div class="layout">
   <div class="panel">
     <span class="eyebrow">Search console</span>
-    <h2 class="section-title" style="margin-top:14px;">Search & Watchers</h2>
-    <p class="muted" style="margin-top:0;">Run fast manual searches on the left, then pin the best setup into a live Discord watcher without leaving the control panel.</p>
+    <h2 class="section-title" style="margin-top:14px;">{{ t('search_watchers') }}</h2>
+    <p class="muted" style="margin-top:0;">{% if current_lang == 'ru' %}Слева можно быстро искать вручную, а ниже сохранять лучшие настройки в живой Discord watcher без выхода из панели.{% else %}Run fast manual searches on the left, then pin the best setup into a live Discord watcher without leaving the control panel.{% endif %}</p>
     <form method="post">
       <input type="hidden" name="action" value="search">
       <div style="margin-bottom:12px;">
@@ -54,12 +54,12 @@
         <textarea name="extra_params" placeholder="catalog[]=123&#10;color[]=7">{{ defaults.extra_params }}</textarea>
       </div>
       <div class="inline" style="margin-top:14px;">
-        <button type="submit">Search now</button>
+          <button type="submit">{{ t('search_now') }}</button>
       </div>
     </form>
       <hr style="border-color:var(--line); margin:18px 0;">
-      <h3>Create Discord watcher</h3>
-      <div class="small muted" style="margin-bottom:12px;">Watcher uses its own query and filters below. It is independent from the manual search above.</div>
+      <h3>{{ t('create_watcher') }}</h3>
+      <div class="small muted" style="margin-bottom:12px;">{% if current_lang == 'ru' %}У watcher-а свои собственные поля ниже. Он не зависит от ручного поиска сверху.{% else %}Watcher uses its own query and filters below. It is independent from the manual search above.{% endif %}</div>
       <form method="post">
         <input type="hidden" name="action" value="create_watcher">
       <div style="margin-bottom:12px;">
@@ -114,11 +114,19 @@
         <div class="small muted" style="margin-top:6px;">Use a low value for near real-time alerts. Recommended: 10-20 sec.</div>
       </div>
       <div style="margin-bottom:12px;">
+        <label>Watcher mode</label>
+        <select name="watcher_mode">
+          <option value="balanced" {% if defaults.watcher_mode == 'balanced' %}selected{% endif %}>Balanced</option>
+          <option value="ultra" {% if defaults.watcher_mode == 'ultra' %}selected{% endif %}>Ultra</option>
+        </select>
+        <div class="small muted" style="margin-top:6px;">Ultra checks only the top {{ 5 }} newest cards per geo for faster alerts and fewer blocks.</div>
+      </div>
+      <div style="margin-bottom:12px;">
         <label>Fresh only (minutes)</label>
         <input name="watcher_fresh_minutes" value="{{ defaults.watcher_fresh_minutes }}">
         <div class="small muted" style="margin-top:6px;">Watcher will notify only listings newer than this age window.</div>
       </div>
-        <button type="submit">Save watcher</button>
+        <button type="submit">{{ t('save_watcher') }}</button>
       </form>
   </div>
 
@@ -165,7 +173,7 @@
         <span class="muted small">Raw: {{ result["raw_count"] }} • Unique shown: {{ result["unique_count"] }} • Pages scanned per geo: {{ defaults.pages }}</span>
       </div>
       {% endif %}
-      <h2 style="margin-top:0;">Active watchers</h2>
+      <h2 style="margin-top:0;">{{ t('active_watchers') }}</h2>
       <div class="cards">
         {% for watcher in watchers %}
         <div class="card">
@@ -173,21 +181,28 @@
             <strong>{{ watcher.name }}</strong>
             {% if watcher.status_state == 'working' %}
             <span class="pill status-pill working">
-              <span>working</span>
+              <span>{{ t('working') }}</span>
               <span class="status-dots" aria-hidden="true"><span></span><span></span><span></span></span>
             </span>
             {% else %}
-            <span class="pill status-pill">{{ watcher.status_state }}</span>
+            <span class="pill status-pill">{{ t(watcher.status_state) }}</span>
             {% endif %}
           </div>
-          <div class="small muted">{{ watcher.query }} • {{ watcher.geos }} • every {{ watcher.interval_seconds }} sec • newest_first • fresh <= {{ watcher.fresh_minutes }} min</div>
+          <div class="small muted">{{ watcher.query }} • {{ watcher.geos }} • every {{ watcher.interval_seconds }} sec • newest_first • {{ watcher.mode|default('balanced') }} • fresh <= {{ watcher.fresh_minutes }} min</div>
           <div class="small muted" style="margin-top:8px;">Last run: {{ watcher.last_run_at or 'never' }} • Last success: {{ watcher.last_success_at or 'never' }}</div>
           <div class="small muted" style="margin-top:6px;">Last sent: {{ watcher.last_notification_count or 0 }} item(s){% if watcher.last_notification_at %} • {{ watcher.last_notification_at }}{% endif %}</div>
+          {% if watcher.last_notification_url %}
+          <div class="small muted" style="margin-top:6px;">Last sent item: <a href="{{ watcher.last_notification_url }}" target="_blank">{{ watcher.last_notification_title or 'Open listing' }}</a></div>
+          {% endif %}
+          {% if watcher.blocked_geos %}
+          <div class="small muted" style="margin-top:6px;">{% if current_lang == 'ru' %}Кулдаун geo:{% else %}Geo cooldown:{% endif %} {% for blocked in watcher.blocked_geos %}<span>{{ blocked.geo|upper }} ({{ blocked.seconds_left }}s)</span>{% if not loop.last %}, {% endif %}{% endfor %}</div>
+          {% endif %}
           <div class="small muted" style="margin-top:6px;">Last scan: {{ watcher.last_scan_count or 0 }} item(s){% if watcher.status_message %} • {{ watcher.status_message }}{% endif %}{% if watcher.last_error %} • {{ watcher.last_error }}{% endif %}</div>
           <div class="inline" style="margin-top:12px;">
-            <form method="post"><input type="hidden" name="action" value="run_watcher"><input type="hidden" name="watcher_id" value="{{ watcher.id }}"><button class="warn" type="submit">Run now</button></form>
-            <form method="post"><input type="hidden" name="action" value="toggle_watcher"><input type="hidden" name="watcher_id" value="{{ watcher.id }}"><input type="hidden" name="enabled" value="{{ 0 if watcher.enabled else 1 }}"><button class="secondary" type="submit">{{ 'Pause' if watcher.enabled else 'Enable' }}</button></form>
-            <form method="post"><input type="hidden" name="action" value="delete_watcher"><input type="hidden" name="watcher_id" value="{{ watcher.id }}"><button class="danger" type="submit">Delete</button></form>
+            <form method="post"><input type="hidden" name="action" value="run_watcher"><input type="hidden" name="watcher_id" value="{{ watcher.id }}"><button class="warn" type="submit">{{ t('run_now') }}</button></form>
+            <form method="post"><input type="hidden" name="action" value="test_watcher_webhook"><input type="hidden" name="watcher_id" value="{{ watcher.id }}"><button class="secondary" type="submit">{{ t('test_webhook') }}</button></form>
+            <form method="post"><input type="hidden" name="action" value="toggle_watcher"><input type="hidden" name="watcher_id" value="{{ watcher.id }}"><input type="hidden" name="enabled" value="{{ 0 if watcher.enabled else 1 }}"><button class="secondary" type="submit">{{ t('pause') if watcher.enabled else t('enable') }}</button></form>
+            <form method="post"><input type="hidden" name="action" value="delete_watcher"><input type="hidden" name="watcher_id" value="{{ watcher.id }}"><button class="danger" type="submit">{{ t('delete') }}</button></form>
           </div>
         </div>
         {% else %}
@@ -197,7 +212,7 @@
     </div>
 
     <div class="panel">
-      <h2 style="margin-top:0;">Search results</h2>
+      <h2 style="margin-top:0;">{{ t('search_results') }}</h2>
       {% if result and result["items"] %}
       <div class="item-grid">
         {% for item in result["items"] %}
