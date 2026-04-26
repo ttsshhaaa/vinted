@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Mercari JP | Vinted Autopilot{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="panel hero-card">
+    <div class="hero-copy">
+      <div class="grid" style="gap:16px;">
+        <span class="eyebrow">Japan checker</span>
+        <h1>Mercari JP module is ready for the next step.</h1>
+        <p>This page is now separated from the Vinted parser, so we can build a dedicated checker for Japanese marketplaces without mixing logic, filters, or watchers into your current flow.</p>
+      </div>
+      <div class="hero-bullets">
+        <div><span>01</span><div>Separate search flow for Mercari Japan with its own keywords, filters, and result cards.</div></div>
+        <div><span>02</span><div>Dedicated watcher logic for fast Japanese listing alerts without touching the Vinted watcher loop.</div></div>
+        <div><span>03</span><div>Independent analytics later for JPY pricing, shipping assumptions, and resale comparison.</div></div>
+      </div>
+    </div>
+
+    <div class="hero-side">
+      <div>
+        <h2 class="section-title">Next build stage</h2>
+        <p class="muted" style="margin:0;">The navigation and route are now in place. The next step is wiring a real Mercari parser and a dedicated search form here.</p>
+      </div>
+      <div class="card">
+        <div class="small muted">Status</div>
+        <div style="font-size:24px; font-weight:800; margin-top:8px;">Scaffold ready</div>
+      </div>
+      <div class="card">
+        <div class="small muted">Planned features</div>
+        <div style="margin-top:8px; display:grid; gap:8px;" class="small">
+          <div>• Mercari keyword search</div>
+          <div>• JP price parsing in yen</div>
+          <div>• Separate Mercari watcher alerts</div>
+          <div>• Model-aware resale analytics</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2 style="margin-top:0;">What we can add next</h2>
+    <div class="cards">
+      <div class="card">
+        <strong>Phase 1</strong>
+        <div class="muted small" style="margin-top:8px;">Build a Mercari JP search form with query, condition, category, and price filters.</div>
+      </div>
+      <div class="card">
+        <strong>Phase 2</strong>
+        <div class="muted small" style="margin-top:8px;">Add result cards, links, photos, seller meta, and yen-to-GBP/EUR conversion.</div>
+      </div>
+      <div class="card">
+        <strong>Phase 3</strong>
+        <div class="muted small" style="margin-top:8px;">Add Mercari-specific watcher alerts and deeper model-level pricing analysis.</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

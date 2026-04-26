@@ -2044,6 +2044,12 @@ def favorites_page():
     return render_template("favorites.html", favorites=favorites)
 
 
+@app.get("/mercari")
+@login_required
+def mercari_page():
+    return render_template("mercari.html")
+
+
 @app.route("/admin", methods=["GET", "POST"])
 @admin_required
 def admin_panel():
