@@ -208,6 +208,21 @@
           <div class="small muted">{{ item.brand }}{% if item.size %} • {{ item.size }}{% endif %}{% if item.condition %} • {{ item.condition }}{% endif %}</div>
           <div class="small muted">Seller: {{ item.seller_country or 'unknown' }}{% if item.seller_city %} / {{ item.seller_city }}{% endif %}</div>
           <div class="small muted">Listed: {{ item.listing_age_label or 'unknown' }}{% if item.seller_last_online %} • Last online: {{ item.seller_last_online }}{% endif %}</div>
+          {% if item.analytics %}
+          <div class="analytics-box">
+            <div class="analytics-grid">
+              <div class="analytics-row"><span>💰 Price</span><strong>{{ item.analytics.price }}</strong></div>
+              <div class="analytics-row"><span>📉 Market</span><strong>{{ item.analytics.market }}</strong></div>
+              <div class="analytics-row"><span>✨ Potential</span><strong>{{ item.analytics.potential }}</strong></div>
+              <div class="analytics-row"><span>📦 Comps</span><strong>{{ item.analytics.comps }}</strong></div>
+              <div class="analytics-row"><span>⏱ Age</span><strong>{{ item.analytics.age }}</strong></div>
+              <div class="analytics-row"><span>📏 Size</span><strong>{{ item.analytics.size }}</strong></div>
+              <div class="analytics-row"><span>🧵 Condition</span><strong>{{ item.analytics.condition }}</strong></div>
+              <div class="analytics-row"><span>🧩 Category</span><strong>{{ item.analytics.category }}</strong></div>
+              <div class="analytics-row"><span>⚠️ Risk</span><strong>{{ item.analytics.risk }}</strong></div>
+            </div>
+          </div>
+          {% endif %}
           <div class="inline" style="margin-top:12px;">
             <a class="btn secondary" href="{{ item.item_url }}" target="_blank">Open listing</a>
             <form method="post">

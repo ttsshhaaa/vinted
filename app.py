@@ -1,6 +1,7 @@
 
 import logging
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -72,32 +73,32 @@ WATCHER_MAX_AGE_CHECK_ITEMS = int(os.environ.get("WATCHER_MAX_AGE_CHECK_ITEMS", 
 DEFAULT_ADMIN_USERNAME = "kon1337"
 DEFAULT_ADMIN_PASSWORD = "thklty13"
 GEO_FLAGS = {
-    "us": "🇺🇸",
-    "uk": "🇬🇧",
-    "fr": "🇫🇷",
-    "de": "🇩🇪",
-    "it": "🇮🇹",
-    "es": "🇪🇸",
-    "nl": "🇳🇱",
-    "be": "🇧🇪",
-    "pt": "🇵🇹",
-    "pl": "🇵🇱",
-    "cz": "🇨🇿",
-    "sk": "🇸🇰",
-    "at": "🇦🇹",
-    "hu": "🇭🇺",
-    "ro": "🇷🇴",
-    "hr": "🇭🇷",
-    "lt": "🇱🇹",
-    "ee": "🇪🇪",
-    "lu": "🇱🇺",
-    "lv": "🇱🇻",
-    "se": "🇸🇪",
-    "si": "🇸🇮",
-    "dk": "🇩🇰",
-    "fi": "🇫🇮",
-    "gr": "🇬🇷",
-    "ie": "🇮🇪",
+    "us": "us",
+    "uk": "gb",
+    "fr": "fr",
+    "de": "de",
+    "it": "it",
+    "es": "es",
+    "nl": "nl",
+    "be": "be",
+    "pt": "pt",
+    "pl": "pl",
+    "cz": "cz",
+    "sk": "sk",
+    "at": "at",
+    "hu": "hu",
+    "ro": "ro",
+    "hr": "hr",
+    "lt": "lt",
+    "ee": "ee",
+    "lu": "lu",
+    "lv": "lv",
+    "se": "se",
+    "si": "si",
+    "dk": "dk",
+    "fi": "fi",
+    "gr": "gr",
+    "ie": "ie",
 }
 
 logging.basicConfig(level=logging.INFO)
@@ -108,6 +109,33 @@ app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY", "change-me-on-rail
 
 _watcher_thread_started = False
 _watcher_http = threading.local()
+
+CATEGORY_HINTS = {
+    "hoodie": "Hoodie",
+    "hoodies": "Hoodie",
+    "sweatshirt": "Sweatshirt",
+    "jumper": "Jumper",
+    "sweater": "Sweater",
+    "jacket": "Jacket",
+    "coat": "Coat",
+    "jeans": "Jeans",
+    "pants": "Pants",
+    "trousers": "Trousers",
+    "cargo": "Cargo",
+    "shirt": "Shirt",
+    "tshirt": "T-Shirt",
+    "tee": "T-Shirt",
+    "polo": "Polo",
+    "shoes": "Shoes",
+    "shoe": "Shoes",
+    "sneaker": "Sneakers",
+    "sneakers": "Sneakers",
+    "trainer": "Sneakers",
+    "trainers": "Sneakers",
+    "bag": "Bag",
+    "cap": "Cap",
+    "hat": "Hat",
+}
 
 
 def ensure_storage() -> None:
@@ -150,6 +178,164 @@ def safe_float(raw_value: str | None, default: float | None = None) -> float | N
     if not normalized:
         return default
     return float(normalized)
+
+
+def item_get(item: object, key: str, default: object = None) -> object:
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
+def item_set(item: object, key: str, value: object) -> None:
+    if isinstance(item, dict):
+        item[key] = value
+        return
+    setattr(item, key, value)
+
+
+def parse_price_amount(value: str | None) -> float | None:
+    if not value:
+        return None
+    match = re.search(r"(\d+(?:[.,]\d{1,2})?)", str(value).replace(" ", ""))
+    if not match:
+        return None
+    try:
+        return float(match.group(1).replace(",", "."))
+    except ValueError:
+        return None
+
+
+def detect_currency_symbol(*values: str | None) -> str:
+    joined = " ".join(str(value or "") for value in values)
+    if "£" in joined or "ВЈ" in joined:
+        return "£"
+    if "€" in joined or "в‚¬" in joined:
+        return "€"
+    if "$" in joined:
+        return "$"
+    if "GBP" in joined.upper():
+        return "£"
+    if "EUR" in joined.upper():
+        return "€"
+    if "USD" in joined.upper():
+        return "$"
+    return ""
+
+
+def format_price_value(amount: float | None, symbol: str = "") -> str:
+    if amount is None:
+        return "unknown"
+    if symbol:
+        return f"{symbol}{amount:.2f}"
+    return f"{amount:.2f}"
+
+
+def infer_category_label(title: str, query: str = "") -> str:
+    haystack = f"{title} {query}".casefold()
+    for keyword, label in CATEGORY_HINTS.items():
+        if keyword in haystack:
+            return label
+    return "Other"
+
+
+def build_market_window(prices: list[float]) -> tuple[float | None, float | None]:
+    if not prices:
+        return None, None
+    ordered = sorted(prices)
+    if len(ordered) >= 6:
+        return ordered[1], ordered[-2]
+    return ordered[0], ordered[-1]
+
+
+def build_item_analytics(items: list[object], query: str = "") -> list[object]:
+    if not items:
+        return items
+
+    pools: dict[str, list[tuple[object, float, str]]] = {}
+    for item in items:
+        price_value = parse_price_amount(str(item_get(item, "price", "")))
+        if price_value is None:
+            continue
+        geo = str(item_get(item, "geo", "")).lower()
+        pools.setdefault(geo, []).append((item, price_value, str(item_get(item, "item_url", ""))))
+
+    for item in items:
+        geo = str(item_get(item, "geo", "")).lower()
+        brand = str(item_get(item, "brand", "")).strip().casefold()
+        title = str(item_get(item, "title", "")).strip()
+        item_url = str(item_get(item, "item_url", "")).strip()
+        price_raw = str(item_get(item, "price", "")).strip()
+        current_price = parse_price_amount(price_raw)
+        currency_symbol = detect_currency_symbol(
+            price_raw,
+            str(item_get(item, "total_price", "")),
+            str(item_get(item, "currency", "")),
+        )
+
+        comparable_prices: list[float] = []
+        for pool_item, pool_price, pool_url in pools.get(geo, []):
+            if pool_url == item_url:
+                continue
+            pool_brand = str(item_get(pool_item, "brand", "")).strip().casefold()
+            pool_title = str(item_get(pool_item, "title", "")).strip().casefold()
+            brand_match = bool(brand and pool_brand and brand == pool_brand)
+            query_hint = bool(query and query.casefold() in pool_title)
+            if brand_match or query_hint:
+                comparable_prices.append(pool_price)
+
+        if len(comparable_prices) < 3:
+            comparable_prices = [
+                pool_price
+                for pool_item, pool_price, pool_url in pools.get(geo, [])
+                if pool_url != item_url
+            ]
+
+        market_low, market_high = build_market_window(comparable_prices)
+        potential_low = None
+        potential_high = None
+        risk_label = "unknown"
+        if current_price is not None and market_low is not None and market_high is not None:
+            potential_low = max(market_low - current_price, 0.0)
+            potential_high = max(market_high - current_price, 0.0)
+            if len(comparable_prices) < 3:
+                risk_label = "medium"
+            elif current_price <= market_low * 0.95:
+                risk_label = "low"
+            elif current_price <= market_high * 1.05:
+                risk_label = "medium"
+            else:
+                risk_label = "high"
+
+        potential_text = "flat"
+        if potential_low is not None and potential_high is not None:
+            if potential_high <= 0:
+                potential_text = "flat"
+            elif abs(potential_low - potential_high) < 0.01:
+                potential_text = f"+{format_price_value(potential_high, currency_symbol)}"
+            else:
+                potential_text = (
+                    f"+{format_price_value(potential_low, currency_symbol)}"
+                    f" to +{format_price_value(potential_high, currency_symbol)}"
+                )
+
+        analytics = {
+            "price": format_price_value(current_price, currency_symbol) if current_price is not None else (price_raw or "unknown"),
+            "market": (
+                f"{format_price_value(market_low, currency_symbol)} - {format_price_value(market_high, currency_symbol)}"
+                if market_low is not None and market_high is not None
+                else "not enough comps"
+            ),
+            "potential": potential_text,
+            "comps": len(comparable_prices),
+            "age": str(item_get(item, "listing_age_label", "") or "unknown"),
+            "size": str(item_get(item, "size", "") or "Other"),
+            "condition": str(item_get(item, "condition", "") or "unknown"),
+            "category": infer_category_label(title, query),
+            "risk": risk_label,
+        }
+        item_set(item, "analytics", analytics)
+
+    return items
 
 
 def create_base_tables(connection: sqlite3.Connection) -> None:
@@ -800,6 +986,7 @@ def run_watcher_search(watcher: sqlite3.Row) -> dict:
         except requests.RequestException as exc:
             failures.append(f"[{geo}] {exc}")
     unique_items = sort_items_by_query_relevance(dedupe_items(all_items), watcher["query"])
+    build_item_analytics(unique_items, watcher["query"])
     return {
         "items": unique_items,
         "raw_count": len(all_items),
@@ -815,6 +1002,35 @@ def resolve_item_age_for_watcher(item_url: str, timeout: int) -> int | None:
         return get_item_age_minutes(session, item_url, timeout=timeout)
     finally:
         session.close()
+
+
+def build_watcher_discord_message_rich(watcher_name: str, item: dict) -> str:
+    title = (item.get("title") or "Untitled listing").strip()
+    price = (item.get("price") or "").strip()
+    geo = (item.get("geo") or "").strip().upper()
+    header = f"{watcher_name} • {title}"
+    if price:
+        header = f"{header} — {price}"
+    if geo:
+        header = f"{header} [{geo}]"
+
+    analytics = item.get("analytics") or {}
+    lines = [header, item["item_url"]]
+    if analytics:
+        lines.extend(
+            [
+                f"💰 Price: {analytics.get('price', 'unknown')}",
+                f"📉 Market: {analytics.get('market', 'not enough comps')}",
+                f"✨ Potential: {analytics.get('potential', 'flat')}",
+                f"📦 Comps: {analytics.get('comps', 0)}",
+                f"⏱ Age: {analytics.get('age', 'unknown')}",
+                f"📏 Size: {analytics.get('size', 'Other')}",
+                f"🧵 Condition: {analytics.get('condition', 'unknown')}",
+                f"🧩 Category: {analytics.get('category', 'Other')}",
+                f"⚠️ Risk: {analytics.get('risk', 'unknown')}",
+            ]
+        )
+    return "\n".join(lines)
 
 
 def build_watcher_discord_message(watcher_name: str, item: dict) -> str:
@@ -951,6 +1167,7 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
                         "geo": item.geo.upper(),
                         "item_url": item.item_url,
                         "age_minutes": item.listing_age_minutes,
+                        "analytics": getattr(item, "analytics", {}),
                     }
                 )
 
@@ -990,7 +1207,7 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
             for item in fresh_items:
                 send_discord_message(
                     watcher["discord_webhook_url"],
-                    build_watcher_discord_message(watcher["name"], item),
+                    build_watcher_discord_message_rich(watcher["name"], item),
                 )
                 with get_db_connection() as connection:
                     connection.execute(
@@ -1208,6 +1425,7 @@ def dashboard():
                 output_dir=OUTPUT_DIR,
             )
             result["items"] = enrich_items_for_display(result["items"], timeout=30, limit=16)
+            result["items"] = build_item_analytics(result["items"], defaults["query"])
             if result.get("failures"):
                 flash(
                     "Some geos failed: "
