@@ -510,6 +510,46 @@ def build_resale_estimate(prices: list[float], scores: list[float]) -> float | N
     return sum(price * max(score, 0.1) for price, score in zip(prices, scores)) / total_weight
 
 
+def split_query_filters(raw_query: str) -> tuple[str, list[str]]:
+    positive_parts: list[str] = []
+    minus_words: list[str] = []
+    for token in re.split(r"\s+", str(raw_query or "").strip()):
+        token = token.strip()
+        if not token:
+            continue
+        if token.startswith("-") and len(token) > 1:
+            cleaned = re.sub(r"[^a-z0-9-]+", "", token[1:].casefold())
+            if cleaned:
+                minus_words.append(cleaned)
+            continue
+        positive_parts.append(token)
+    return " ".join(positive_parts).strip(), minus_words
+
+
+def build_listing_filter_text(item: object) -> str:
+    return " ".join(
+        [
+            str(item_get(item, "title", "")).casefold(),
+            str(item_get(item, "subtitle", "")).casefold(),
+            str(item_get(item, "brand", "")).casefold(),
+            str(item_get(item, "condition", "")).casefold(),
+            str(item_get(item, "size", "")).casefold(),
+        ]
+    )
+
+
+def apply_minus_word_filter(items: list[object], minus_words: list[str]) -> list[object]:
+    if not minus_words:
+        return items
+    filtered: list[object] = []
+    for item in items:
+        haystack = build_listing_filter_text(item)
+        if any(word and word in haystack for word in minus_words):
+            continue
+        filtered.append(item)
+    return filtered
+
+
 def build_item_analytics(items: list[object], query: str = "") -> list[object]:
     if not items:
         return items
@@ -561,6 +601,7 @@ def build_item_analytics(items: list[object], query: str = "") -> list[object]:
         potential_mid = None
         risk_label = "unknown"
         confidence_label = "low"
+        deal_label = "unclear"
 
         if current_price is not None and market_low is not None and market_high is not None:
             potential_high = max(market_high - current_price, 0.0)
@@ -579,6 +620,16 @@ def build_item_analytics(items: list[object], query: str = "") -> list[object]:
             else:
                 confidence_label = "low"
                 risk_label = "high"
+
+            pricing_anchor = resale_estimate or market_high
+            if pricing_anchor and pricing_anchor > 0:
+                ratio = current_price / pricing_anchor
+                if ratio <= 0.72:
+                    deal_label = "good deal"
+                elif ratio <= 0.98:
+                    deal_label = "fair"
+                else:
+                    deal_label = "overpriced"
 
         potential_text = "flat"
         if potential_high is not None:
@@ -611,6 +662,7 @@ def build_item_analytics(items: list[object], query: str = "") -> list[object]:
             "size": str(item_get(item, "size", "") or "Other"),
             "condition": str(item_get(item, "condition", "") or "unknown"),
             "category": infer_category_label(title, query),
+            "deal": deal_label,
             "risk": risk_label,
         }
         item_set(item, "analytics", analytics)
@@ -1337,6 +1389,8 @@ def run_watcher_search(watcher: sqlite3.Row) -> dict:
     failures: list[str] = []
     watcher_mode = str(watcher["mode"] or "balanced").strip().lower()
     top_n = WATCHER_ULTRA_TOP_N if watcher_mode == "ultra" else 0
+    search_query, minus_words = split_query_filters(str(watcher["query"] or ""))
+    search_query = search_query or str(watcher["query"] or "").strip()
     extra_params = parse_extra_params(
         [line.strip() for line in watcher["extra_params"].splitlines() if line.strip()]
     )
@@ -1345,7 +1399,7 @@ def run_watcher_search(watcher: sqlite3.Row) -> dict:
             geo_items = scrape_geo(
                 session=session,
                 geo=geo,
-                query=watcher["query"],
+                query=search_query,
                 pages=1,
                 delay=0,
                 order="newest_first",
@@ -1359,8 +1413,9 @@ def run_watcher_search(watcher: sqlite3.Row) -> dict:
             all_items.extend(geo_items)
         except requests.RequestException as exc:
             failures.append(f"[{geo}] {exc}")
-    unique_items = sort_items_by_query_relevance(dedupe_items(all_items), watcher["query"])
-    build_item_analytics(unique_items, watcher["query"])
+    unique_items = sort_items_by_query_relevance(dedupe_items(all_items), search_query)
+    unique_items = apply_minus_word_filter(unique_items, minus_words)
+    build_item_analytics(unique_items, search_query)
     return {
         "items": unique_items,
         "raw_count": len(all_items),
@@ -1485,6 +1540,7 @@ def build_watcher_discord_message_rich(watcher_name: str, item: dict) -> str:
                 f"\U0001f4cf Size: {analytics.get('size', 'Other')}",
                 f"\U0001f9f5 Condition: {analytics.get('condition', 'unknown')}",
                 f"\U0001f9e9 Category: {analytics.get('category', 'Other')}",
+                f"\U0001f3f7\ufe0f Deal: {analytics.get('deal', 'unclear')}",
                 f"\u26a0\ufe0f Risk: {analytics.get('risk', 'unknown')}",
             ]
         )
@@ -1934,8 +1990,11 @@ def dashboard():
 
             geos = expand_geos(defaults["selected_geos"] or ["fr"])
             raw_extra = [line.strip() for line in defaults["extra_params"].splitlines() if line.strip()]
+            search_query, minus_words = split_query_filters(defaults["query"])
+            if not search_query:
+                raise ValueError("Enter a main query before using minus-words.")
             result = run_search(
-                query=defaults["query"],
+                query=search_query,
                 geos=geos,
                 pages=safe_int(defaults["pages"]) or 1,
                 delay=safe_float(defaults["delay"], 0.5) or 0.5,
@@ -1945,8 +2004,11 @@ def dashboard():
                 extra_params=parse_extra_params(raw_extra),
                 output_dir=OUTPUT_DIR,
             )
+            result["items"] = apply_minus_word_filter(result["items"], minus_words)
             result["items"] = enrich_items_for_display(result["items"], timeout=30, limit=16)
-            result["items"] = build_item_analytics(result["items"], defaults["query"])
+            result["items"] = build_item_analytics(result["items"], search_query)
+            result["unique_count"] = len(result["items"])
+            result["excluded_keywords"] = minus_words
             if result.get("failures"):
                 flash(
                     "Some geos failed: "

@@ -11,6 +11,7 @@
       <div style="margin-bottom:12px;">
         <label>Brand / item query</label>
         <input name="query" value="{{ defaults.query }}" required>
+        <div class="small muted" style="margin-top:6px;">Supports minus-words: <code>-kids -junior -women</code></div>
       </div>
       <div class="row2">
         <div>
@@ -69,6 +70,7 @@
       <div style="margin-bottom:12px;">
         <label>Watcher query</label>
         <input name="watcher_query" value="{{ defaults.watcher_query }}">
+        <div class="small muted" style="margin-top:6px;">You can also exclude unwanted matches here: <code>-kids -junior -women</code></div>
       </div>
       <div class="row2" style="margin-top:12px;">
         <div>
@@ -171,6 +173,9 @@
         <a class="btn secondary" href="{{ url_for('download', fmt='json', filename=result['json_path']|basename) }}">Download JSON</a>
         <a class="btn secondary" href="{{ url_for('download', fmt='csv', filename=result['csv_path']|basename) }}">Download CSV</a>
         <span class="muted small">Raw: {{ result["raw_count"] }} • Unique shown: {{ result["unique_count"] }} • Pages scanned per geo: {{ defaults.pages }}</span>
+        {% if result.get("excluded_keywords") %}
+        <span class="muted small">Excluded: {% for keyword in result["excluded_keywords"] %}-{{ keyword }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
+        {% endif %}
       </div>
       {% endif %}
       <h2 style="margin-top:0;">Active watchers</h2>
@@ -236,6 +241,7 @@
               <div class="analytics-row"><span>📏 Size</span><strong>{{ item.analytics.size }}</strong></div>
               <div class="analytics-row"><span>🧵 Condition</span><strong>{{ item.analytics.condition }}</strong></div>
               <div class="analytics-row"><span>🧩 Category</span><strong>{{ item.analytics.category }}</strong></div>
+              <div class="analytics-row"><span>🏷️ Deal</span><strong>{{ item.analytics.deal }}</strong></div>
               <div class="analytics-row"><span>⚠️ Risk</span><strong>{{ item.analytics.risk }}</strong></div>
             </div>
           </div>
