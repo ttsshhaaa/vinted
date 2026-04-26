@@ -70,6 +70,7 @@ WATCHER_STARTUP_GRACE_SECONDS = 8
 WATCHER_SEARCH_TIMEOUT_SECONDS = int(os.environ.get("WATCHER_SEARCH_TIMEOUT_SECONDS", "12"))
 WATCHER_MAX_PARALLEL = int(os.environ.get("WATCHER_MAX_PARALLEL", "2"))
 WATCHER_MAX_AGE_CHECK_ITEMS = int(os.environ.get("WATCHER_MAX_AGE_CHECK_ITEMS", "12"))
+WATCHER_SEEN_RETENTION_DAYS = int(os.environ.get("WATCHER_SEEN_RETENTION_DAYS", "5"))
 DEFAULT_ADMIN_USERNAME = "kon1337"
 DEFAULT_ADMIN_PASSWORD = "thklty13"
 GEO_FLAGS = {
@@ -551,6 +552,13 @@ def init_db() -> None:
         )
         create_base_tables(connection)
         connection.commit()
+    removed = prune_old_watcher_seen_items()
+    if removed:
+        logger.info(
+            "Pruned %s old watcher_seen_items rows older than %s days",
+            removed,
+            WATCHER_SEEN_RETENTION_DAYS,
+        )
 
 
 def get_user_by_id(user_id: int | None) -> sqlite3.Row | None:
@@ -925,6 +933,20 @@ def delete_watcher(watcher_id: int) -> None:
         connection.commit()
 
 
+def prune_old_watcher_seen_items(retention_days: int = WATCHER_SEEN_RETENTION_DAYS) -> int:
+    retention_days = max(int(retention_days or 5), 1)
+    with get_db_connection() as connection:
+        cursor = connection.execute(
+            """
+            DELETE FROM watcher_seen_items
+            WHERE datetime(first_seen_at) < datetime('now', ?)
+            """,
+            (f"-{retention_days} days",),
+        )
+        connection.commit()
+        return int(cursor.rowcount or 0)
+
+
 def is_watcher_due(watcher: sqlite3.Row) -> bool:
     if not watcher["last_run_at"]:
         return True
@@ -1269,8 +1291,18 @@ def run_single_watcher(watcher_id: int) -> tuple[int, int]:
 def watcher_worker() -> None:
     logger.info("Watcher worker boot grace period: %s seconds", WATCHER_STARTUP_GRACE_SECONDS)
     time.sleep(WATCHER_STARTUP_GRACE_SECONDS)
+    last_seen_prune = 0.0
     while True:
         try:
+            if time.time() - last_seen_prune >= 3600:
+                removed = prune_old_watcher_seen_items()
+                if removed:
+                    logger.info(
+                        "Pruned %s old watcher_seen_items rows older than %s days",
+                        removed,
+                        WATCHER_SEEN_RETENTION_DAYS,
+                    )
+                last_seen_prune = time.time()
             watchers = [watcher for watcher in list_watchers() if watcher["enabled"]]
             due_watchers = [watcher for watcher in watchers if is_watcher_due(watcher)]
             if due_watchers:
