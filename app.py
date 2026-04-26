@@ -412,6 +412,212 @@ def build_item_analytics(items: list[object], query: str = "") -> list[object]:
     return items
 
 
+def detect_currency_symbol(*values: str | None) -> str:
+    joined = " ".join(str(value or "") for value in values)
+    if "\u00a3" in joined or "ВЈ" in joined or "Р’Р€" in joined:
+        return "\u00a3"
+    if "\u20ac" in joined or "в‚¬" in joined or "РІвЂљВ¬" in joined:
+        return "\u20ac"
+    if "$" in joined:
+        return "$"
+    if "GBP" in joined.upper():
+        return "\u00a3"
+    if "EUR" in joined.upper():
+        return "\u20ac"
+    if "USD" in joined.upper():
+        return "$"
+    return ""
+
+
+def normalize_size_label(raw_size: str | None) -> str:
+    cleaned = re.sub(r"\s+", "", str(raw_size or "").strip().casefold())
+    if not cleaned:
+        return ""
+    aliases = {
+        "extrasmall": "xs",
+        "xsmall": "xs",
+        "small": "s",
+        "medium": "m",
+        "large": "l",
+        "extralarge": "xl",
+        "xxl": "2xl",
+        "xxxl": "3xl",
+    }
+    return aliases.get(cleaned, cleaned)
+
+
+def tokenize_for_matching(*parts: str | None) -> set[str]:
+    tokens: set[str] = set()
+    for part in parts:
+        for token in re.findall(r"[a-z0-9]{2,}", str(part or "").casefold()):
+            if token in {"size", "with", "very", "good", "the", "and", "for"}:
+                continue
+            tokens.add(token)
+    return tokens
+
+
+def listing_similarity_score(base_item: object, comp_item: object, query: str = "") -> float:
+    base_brand = str(item_get(base_item, "brand", "")).strip().casefold()
+    comp_brand = str(item_get(comp_item, "brand", "")).strip().casefold()
+    base_title = str(item_get(base_item, "title", "")).strip()
+    comp_title = str(item_get(comp_item, "title", "")).strip()
+    base_size = normalize_size_label(str(item_get(base_item, "size", "")))
+    comp_size = normalize_size_label(str(item_get(comp_item, "size", "")))
+    base_condition = str(item_get(base_item, "condition", "")).strip().casefold()
+    comp_condition = str(item_get(comp_item, "condition", "")).strip().casefold()
+    base_category = infer_category_label(base_title, query).casefold()
+    comp_category = infer_category_label(comp_title, query).casefold()
+
+    base_tokens = tokenize_for_matching(base_title, base_brand, query)
+    comp_tokens = tokenize_for_matching(comp_title, comp_brand)
+    overlap = len(base_tokens & comp_tokens)
+    union = len(base_tokens | comp_tokens) or 1
+    token_ratio = overlap / union
+
+    score = token_ratio * 8.0
+    if base_brand and comp_brand and base_brand == comp_brand:
+        score += 3.0
+    if base_category and comp_category and base_category == comp_category:
+        score += 2.0
+    if base_size and comp_size and base_size == comp_size:
+        score += 1.5
+    if base_condition and comp_condition and base_condition == comp_condition:
+        score += 1.0
+    if base_title.casefold() in comp_title.casefold() or comp_title.casefold() in base_title.casefold():
+        score += 1.5
+    return score
+
+
+def build_market_window(prices: list[float]) -> tuple[float | None, float | None]:
+    if len(prices) < 2:
+        return None, None
+    ordered = sorted(prices)
+    if len(ordered) >= 8:
+        return ordered[1], ordered[-2]
+    if len(ordered) >= 4:
+        return ordered[0], ordered[-2]
+    return ordered[0], ordered[-1]
+
+
+def build_resale_estimate(prices: list[float], scores: list[float]) -> float | None:
+    if not prices:
+        return None
+    if not scores or len(scores) != len(prices):
+        return sum(prices) / len(prices)
+    total_weight = sum(max(score, 0.1) for score in scores)
+    if total_weight <= 0:
+        return sum(prices) / len(prices)
+    return sum(price * max(score, 0.1) for price, score in zip(prices, scores)) / total_weight
+
+
+def build_item_analytics(items: list[object], query: str = "") -> list[object]:
+    if not items:
+        return items
+
+    pools: dict[str, list[tuple[object, float, str]]] = {}
+    for item in items:
+        price_value = parse_price_amount(str(item_get(item, "price", "")))
+        if price_value is None:
+            continue
+        geo = str(item_get(item, "geo", "")).lower()
+        pools.setdefault(geo, []).append((item, price_value, str(item_get(item, "item_url", ""))))
+
+    for item in items:
+        geo = str(item_get(item, "geo", "")).lower()
+        title = str(item_get(item, "title", "")).strip()
+        item_url = str(item_get(item, "item_url", "")).strip()
+        price_raw = str(item_get(item, "price", "")).strip()
+        current_price = parse_price_amount(price_raw)
+        currency_symbol = detect_currency_symbol(
+            price_raw,
+            str(item_get(item, "total_price", "")),
+            str(item_get(item, "currency", "")),
+        )
+
+        scored_comparables: list[tuple[float, float]] = []
+        for pool_item, pool_price, pool_url in pools.get(geo, []):
+            if pool_url == item_url:
+                continue
+            score = listing_similarity_score(item, pool_item, query)
+            if score > 0:
+                scored_comparables.append((score, pool_price))
+
+        scored_comparables.sort(key=lambda row: row[0], reverse=True)
+        if len(scored_comparables) < 4:
+            scored_comparables = [
+                (listing_similarity_score(item, pool_item, query), pool_price)
+                for pool_item, pool_price, pool_url in pools.get(geo, [])
+                if pool_url != item_url
+            ]
+            scored_comparables.sort(key=lambda row: row[0], reverse=True)
+
+        top_comparables = scored_comparables[:12]
+        comparable_prices = [price for _, price in top_comparables]
+        comparable_scores = [score for score, _ in top_comparables]
+
+        market_low, market_high = build_market_window(comparable_prices)
+        resale_estimate = build_resale_estimate(comparable_prices, comparable_scores)
+        potential_high = None
+        potential_mid = None
+        risk_label = "unknown"
+        confidence_label = "low"
+
+        if current_price is not None and market_low is not None and market_high is not None:
+            potential_high = max(market_high - current_price, 0.0)
+            if resale_estimate is not None:
+                potential_mid = max(resale_estimate - current_price, 0.0)
+            top_score = comparable_scores[0] if comparable_scores else 0.0
+            if len(comparable_prices) < 3:
+                risk_label = "high"
+                confidence_label = "low"
+            elif top_score >= 7:
+                confidence_label = "high"
+                risk_label = "low" if current_price <= (resale_estimate or market_high) * 0.92 else "medium"
+            elif top_score >= 4:
+                confidence_label = "medium"
+                risk_label = "medium"
+            else:
+                confidence_label = "low"
+                risk_label = "high"
+
+        potential_text = "flat"
+        if potential_high is not None:
+            if potential_high <= 0:
+                potential_text = "flat"
+            elif potential_mid is not None:
+                potential_text = (
+                    f"+{format_price_value(potential_mid, currency_symbol)} avg"
+                    f" to +{format_price_value(potential_high, currency_symbol)}"
+                )
+            else:
+                potential_text = f"up to +{format_price_value(potential_high, currency_symbol)}"
+
+        analytics = {
+            "price": format_price_value(current_price, currency_symbol) if current_price is not None else (price_raw or "unknown"),
+            "resale": (
+                format_price_value(resale_estimate, currency_symbol)
+                if resale_estimate is not None
+                else "not enough comps"
+            ),
+            "market": (
+                f"{format_price_value(market_low, currency_symbol)} - {format_price_value(market_high, currency_symbol)}"
+                if market_low is not None and market_high is not None
+                else "not enough comps"
+            ),
+            "potential": potential_text,
+            "comps": len(comparable_prices),
+            "confidence": confidence_label,
+            "age": str(item_get(item, "listing_age_label", "") or "unknown"),
+            "size": str(item_get(item, "size", "") or "Other"),
+            "condition": str(item_get(item, "condition", "") or "unknown"),
+            "category": infer_category_label(title, query),
+            "risk": risk_label,
+        }
+        item_set(item, "analytics", analytics)
+
+    return items
+
+
 def normalize_signature_text(value: str) -> str:
     normalized = re.sub(r"\s+", " ", str(value or "").strip().casefold())
     return re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
@@ -1237,6 +1443,49 @@ def build_watcher_discord_message_rich(watcher_name: str, item: dict) -> str:
                 f"Condition: {analytics.get('condition', 'unknown')}",
                 f"Category: {analytics.get('category', 'Other')}",
                 f"Risk: {analytics.get('risk', 'unknown')}",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def build_watcher_discord_message(watcher_name: str, item: dict) -> str:
+    title = (item.get("title") or "Untitled listing").strip()
+    price = (item.get("price") or "").strip()
+    geo = (item.get("geo") or "").strip().upper()
+    header = f"{watcher_name} • {title}"
+    if price:
+        header = f"{header} — {price}"
+    if geo:
+        header = f"{header} [{geo}]"
+    return "\n".join([header, item["item_url"]])
+
+
+def build_watcher_discord_message_rich(watcher_name: str, item: dict) -> str:
+    title = (item.get("title") or "Untitled listing").strip()
+    price = (item.get("price") or "").strip()
+    geo = (item.get("geo") or "").strip().upper()
+    header = f"{watcher_name} • {title}"
+    if price:
+        header = f"{header} — {price}"
+    if geo:
+        header = f"{header} [{geo}]"
+
+    analytics = item.get("analytics") or {}
+    lines = [header, item["item_url"]]
+    if analytics:
+        lines.extend(
+            [
+                f"\U0001f4b0 Price: {analytics.get('price', 'unknown')}",
+                f"\U0001f4b8 Resale: {analytics.get('resale', 'not enough comps')}",
+                f"\U0001f4c9 Market: {analytics.get('market', 'not enough comps')}",
+                f"\u2728 Potential: {analytics.get('potential', 'flat')}",
+                f"\U0001f4e6 Comps: {analytics.get('comps', 0)}",
+                f"\U0001f9e0 Confidence: {analytics.get('confidence', 'low')}",
+                f"\u23f1 Age: {analytics.get('age', 'unknown')}",
+                f"\U0001f4cf Size: {analytics.get('size', 'Other')}",
+                f"\U0001f9f5 Condition: {analytics.get('condition', 'unknown')}",
+                f"\U0001f9e9 Category: {analytics.get('category', 'Other')}",
+                f"\u26a0\ufe0f Risk: {analytics.get('risk', 'unknown')}",
             ]
         )
     return "\n".join(lines)
